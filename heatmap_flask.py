@@ -246,7 +246,7 @@ def generate_heatmap():
         return jsonify(
             {
                 "status": "success",
-                "heatmap_url": f"http://localhost:5000/heatmap/result/{city}_{unique_filename}",
+                "heatmap_url": f"https://py.laneterraleverapi.org/heatmap/result/{city}_{unique_filename}",
             }
         )
     else:
