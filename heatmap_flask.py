@@ -7,6 +7,7 @@ import folium
 from folium import Choropleth
 import json
 from werkzeug.utils import secure_filename
+from waitress import serve
 
 app = Flask(__name__)
 
