@@ -1,6 +1,6 @@
 import os
 import uuid
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 import pandas as pd
 import geopandas as gpd
 import folium
@@ -98,13 +98,9 @@ def color_scale(value, max_value, min_value):
         return "#d7191c"
 
 
-def construct_geoJSON(user_zips):
-    print(user_zips)
-
-
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return {"STATUS": "OK", "CODE": 200}
 
 
 @app.route("/heatmap/result/<filename>")
@@ -156,10 +152,22 @@ def generate_heatmap():
         max_value = input_df[col_names[main_col]].max()
         min_value = input_df[col_names[main_col]].min()
 
-        us_zips = pd.read_csv("./static/USA_zip_list.csv")
+        input_df[col_names[zip_col]] = input_df[col_names[zip_col]].astype(str)
+
+        input_df["Parsed Zip Code"] = (
+            input_df[col_names[zip_col]].str.extract(r"(\d{5})")[0].astype(str)
+        )
+
+        us_zips = pd.read_csv("./static/USA_zip_list.csv", dtype={"zip_code": str})
+
+        us_zips["zip_code"] = us_zips["zip_code"].astype(str)
 
         merged_data = pd.merge(
-            input_df, us_zips, how="left", left_on=col_names[0], right_on="zip_code"
+            input_df,
+            us_zips,
+            how="left",
+            left_on="Parsed Zip Code",
+            right_on="zip_code",
         )
 
         unique_codes = merged_data["state_code"].unique().tolist()
@@ -172,124 +180,110 @@ def generate_heatmap():
         filtered_new_geo_df = None
 
         for state_code, state_name in zip(unique_codes, state_values):
-            print(state_code.lower())
-            print(state_name)
             file_name = f"./State-zip-code-GeoJSON/{state_code.lower()}_{state_name}_zip_codes_geo.min.json"
 
             entire_gdf = gpd.read_file(file_name)
 
-            temp_gdf = entire_gdf["features"]
+            if filtered_new_geo_df is None:
+                filtered_new_geo_df = entire_gdf
+            else:
+                filtered_new_geo_df = pd.concat([entire_gdf, filtered_new_geo_df])
 
-            print(temp_gdf)
+        file_prefix = request.form.get("city")
 
-            # if filtered_new_geo_df is None:
-            #     filtered_new_geo_df = entire_gdf
-            # else:
-            #     filtered_new_geo_df = filtered_new_geo_df["features"].append(temp_gdf)
+        filtered_new_geo_df = filtered_new_geo_df[
+            filtered_new_geo_df["ZCTA5CE10"].isin(input_df["Parsed Zip Code"].tolist())
+        ]
 
-        # print(filtered_new_geo_df)
+        merged_geo_json = json.loads(
+            pd.merge(
+                filtered_new_geo_df,
+                input_df,
+                left_on="ZCTA5CE10",
+                right_on="Parsed Zip Code",
+                how="left",
+            )
+            .fillna(0)
+            .to_json()
+        )
 
-        # input_df[col_names[zip_col]] = input_df[col_names[zip_col]].astype(str)
+        bounds = filtered_new_geo_df.total_bounds
+        centroid = filtered_new_geo_df.geometry.unary_union.centroid
+        latitude = centroid.y
+        longitude = centroid.x
 
-        # input_df["Parsed Zip Code"] = input_df[col_names[zip_col]].str.extract(
-        #     r"(\d{5})"
-        # )[0]
+        coordinates = [latitude, longitude]
+        m = folium.Map(location=coordinates)
+        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-        # construct_geoJSON(input_df["Parsed Zip Code"])
+        Choropleth(
+            geo_data=merged_geo_json,
+            name="choropleth",
+            data=input_df,
+            columns=[
+                "Parsed Zip Code",
+                col_names[main_col],
+            ],
+            key_on="feature.properties.ZCTA5CE10",
+            fill_color="YlOrRd",
+            fill_opacity=0.6,
+            line_opacity=0.2,
+            legend_name=col_names[main_col],
+            highlight=True,
+        ).add_to(m)
 
-        # file_prefix = request.form.get("city")
+        style_function = lambda x: {
+            "fillColor": color_scale(
+                x["properties"][col_names[main_col]], max_value, min_value
+            ),
+            "color": "black",
+            "weight": 1,
+            "fillOpacity": 0.7,
+        }
+        highlight_function = lambda x: {
+            "fillColor": "#000000",
+            "color": "#000000",
+            "fillOpacity": 0.50,
+            "weight": 0.1,
+        }
+        fields = ["ZCTA5CE10"]
+        aliases = ["Zip Code: "]
 
-        # filtered_new_geo_df = filtered_new_geo_df[
-        #     filtered_new_geo_df["ZCTA5CE10"].isin(input_df["Parsed Zip Code"].tolist())
-        # ]
+        for name in col_names[1:]:
+            fields.append(name)
+            aliases.append(name + ": ")
 
-        # merged_geo_json = json.loads(
-        #     pd.merge(
-        #         filtered_new_geo_df,
-        #         input_df,
-        #         left_on="ZCTA5CE10",
-        #         right_on="Parsed Zip Code",
-        #         how="left",
-        #     )
-        #     .fillna(0)
-        #     .to_json()
-        # )
+        NIL = folium.features.GeoJson(
+            merged_geo_json,
+            style_function=style_function,
+            control=False,
+            highlight_function=highlight_function,
+            tooltip=folium.features.GeoJsonTooltip(
+                fields=fields,
+                aliases=aliases,
+                style=(
+                    "background-color: white; color: #333333; font-family: arial; font-size: 12px; padding: 10px;"
+                ),
+            ),
+        )
+        m.add_child(NIL)
+        m.keep_in_front(NIL)
 
-        # bounds = filtered_new_geo_df.total_bounds
-        # centroid = filtered_new_geo_df.geometry.unary_union.centroid
-        # latitude = centroid.y
-        # longitude = centroid.x
+        # Save the generated heatmap
+        unique_filename = f"{uuid.uuid4().hex}.html"
+        save_path = os.path.join(HEATMAP_DIR, file_prefix + "_" + unique_filename)
+        m.save(save_path)
 
-        # coordinates = [latitude, longitude]
-        # m = folium.Map(location=coordinates)
-        # m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+        # Delete the user input spreadsheet
+        os.remove(filepath)
 
-        # Choropleth(
-        #     geo_data=merged_geo_json,
-        #     name="choropleth",
-        #     data=input_df,
-        #     columns=[
-        #         "Parsed Zip Code",
-        #         col_names[main_col],
-        #     ],
-        #     key_on="feature.properties.ZCTA5CE10",
-        #     fill_color="YlOrRd",
-        #     fill_opacity=0.6,
-        #     line_opacity=0.2,
-        #     legend_name=col_names[main_col],
-        #     highlight=True,
-        # ).add_to(m)
-
-        # style_function = lambda x: {
-        #     "fillColor": color_scale(
-        #         x["properties"][col_names[main_col]], max_value, min_value
-        #     ),
-        #     "color": "black",
-        #     "weight": 1,
-        #     "fillOpacity": 0.7,
-        # }
-        # highlight_function = lambda x: {
-        #     "fillColor": "#000000",
-        #     "color": "#000000",
-        #     "fillOpacity": 0.50,
-        #     "weight": 0.1,
-        # }
-        # fields = ["ZCTA5CE10"]
-        # aliases = ["Zip Code: "]
-
-        # for name in col_names[1:]:
-        #     fields.append(name)
-        #     aliases.append(name + ": ")
-
-        # NIL = folium.features.GeoJson(
-        #     merged_geo_json,
-        #     style_function=style_function,
-        #     control=False,
-        #     highlight_function=highlight_function,
-        #     tooltip=folium.features.GeoJsonTooltip(
-        #         fields=fields,
-        #         aliases=aliases,
-        #         style=(
-        #             "background-color: white; color: #333333; font-family: arial; font-size: 12px; padding: 10px;"
-        #         ),
-        #     ),
-        # )
-        # m.add_child(NIL)
-        # m.keep_in_front(NIL)
-
-        # # Save the generated heatmap
-        # unique_filename = f"{uuid.uuid4().hex}.html"
-        # save_path = os.path.join(HEATMAP_DIR, file_prefix + "_" + unique_filename)
-        # m.save(save_path)
-
-        # # Return the link to the user
-        # return jsonify(
-        #     {
-        #         "status": "success",
-        #         "heatmap_url": f"http://localhost:5000/heatmap/result/{file_prefix}_{unique_filename}",
-        #     }
-        # )
-        return "correct"
+        # Return the link to the user
+        return jsonify(
+            {
+                "status": "success",
+                "heatmap_url": f"http://localhost:5000/heatmap/result/{file_prefix}_{unique_filename}",
+            }
+        )
     else:
         return jsonify({"error": "Invalid file type"}), 400
 
