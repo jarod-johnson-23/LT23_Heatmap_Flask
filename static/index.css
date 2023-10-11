@@ -28,7 +28,7 @@ input[type="submit"] {
   color: #141a2d;
   font-size: 18px;
   font-weight: 400;
-  transition: 0.4s;
+  transition: 0.2s;
 }
 
 input[type="submit"]:hover {
