@@ -8,8 +8,10 @@ from folium import Choropleth
 import json
 from werkzeug.utils import secure_filename
 from waitress import serve
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 # Directory to save the generated heatmaps
 HEATMAP_DIR = "./heatmap/result"
@@ -98,6 +100,13 @@ def color_scale(value, max_value, min_value):
         return "#d7191c"
 
 
+def parse_input(input_str):
+    if input_str:
+        return list(map(int, input_str.split(",")))
+    else:
+        return []
+
+
 @app.route("/")
 def index():
     return {"STATUS": "OK", "CODE": 200}
@@ -144,9 +153,10 @@ def generate_heatmap():
         else:
             input_df = pd.read_excel(excel_path)
 
-        main_col = 1
-        zip_col = 0
-        other_cols = []
+        main_col = int(request.form.get("main_col"))
+        zip_col = int(request.form.get("zip_col"))
+        other_cols = parse_input(request.form.get("sec_col"))
+        other_cols.insert(0, main_col)
 
         col_names = input_df.columns.tolist()
         max_value = input_df[col_names[main_col]].max()
@@ -249,9 +259,10 @@ def generate_heatmap():
         fields = ["ZCTA5CE10"]
         aliases = ["Zip Code: "]
 
-        for name in col_names[1:]:
-            fields.append(name)
-            aliases.append(name + ": ")
+        for i, name in enumerate(col_names):
+            if i in other_cols:
+                fields.append(name)
+                aliases.append(name + ": ")
 
         NIL = folium.features.GeoJson(
             merged_geo_json,
