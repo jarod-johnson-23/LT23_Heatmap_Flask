@@ -1,13 +1,16 @@
 import os
+import io
 import uuid
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file
 import pandas as pd
 import geopandas as gpd
 import folium
 from folium import Choropleth
 import json
 from werkzeug.utils import secure_filename
-from waitress import serve
+from datetime import timedelta
+from openpyxl import load_workbook
+from openpyxl.styles import NamedStyle
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -107,9 +110,212 @@ def parse_input(input_str):
         return []
 
 
+def preprocess_data(filename, exclude_index=0):
+    # Determine the file type and read accordingly
+    if filename.endswith(".xlsx"):
+        df = pd.read_excel(filename)
+    elif filename.endswith(".csv"):
+        df = pd.read_csv(filename)
+    else:
+        raise ValueError("Unsupported file format")
+
+    # Get the column name based on the provided index
+    exclude_column = df.columns[exclude_index] if exclude_index is not None else None
+
+    # Iterate over all values in the dataframe, excluding the specified column
+    for col in df.columns:
+        if col != exclude_column:
+            df[col] = df[col].apply(lambda x: convert_to_number(x))
+
+    return df
+
+
+def convert_to_number(val):
+    # If value is a string, remove commas
+    if isinstance(val, str):
+        val = val.replace(",", "")
+
+    # Try converting to a number
+    try:
+        number = float(val)
+
+        return number
+
+        # # If it's a whole number, return as integer with commas
+        # if number.is_integer():
+        #     return "{:,.0f}".format(number)
+        # # If it has decimals, return with commas and retain original decimal places
+        # else:
+        #     # Convert the number to string and count the number of decimal places
+        #     decimal_places = len(str(number).split(".")[1])
+        #     format_string = "{:,.%df}" % decimal_places
+        #     return format_string.format(number)
+
+    except ValueError:
+        return "0"
+
+
+# Load the data
+def load_data():
+    toyota_data = pd.read_excel("Toyota E Submission V2- June 2023.xlsx", skiprows=1)
+    coop_data = pd.read_excel("2023 Co-op model rotation.xlsx").drop(
+        columns=["Total"], errors="ignore"
+    )
+    nielsen_data = pd.read_excel("Nielsen Calendar.xlsx")
+    return toyota_data, coop_data, nielsen_data
+
+
+# Step 1: Modify Media Name and Budget Code
+def modify_media_and_budget(toyota_data, YC):
+    toyota_data["Media Name"] = toyota_data["Media Name"].replace(
+        {"Cable": "Broadcast", "TV": "Broadcast", "Radio": "Radio/Online Radio"}
+    )
+    toyota_data["Budget Code"] = toyota_data["Budget Code"].replace(
+        {"Event": f"TDA{YC}", "TCUV": f"TCUV{YC}", "Parts and Service": f"PS{YC}"}
+    )
+    return toyota_data
+
+
+# Step 2: Update the Campaign Column
+def update_campaign(toyota_data, YC, MC):
+    toyota_data["Campaign"] = "RYO" + YC + MC  # Default value
+    toyota_data.loc[toyota_data["Budget Code"] == f"PS{YC}", "Campaign"] = f"PS{YC}{MC}"
+    toyota_data.loc[
+        toyota_data["Budget Code"] == f"TCUV{YC}", "Campaign"
+    ] = f"TCUV{YC}{MC}"
+    toyota_data["Campaign"] = toyota_data["Campaign"].str.replace(
+        " ", ""
+    )  # Removing any spaces
+    return toyota_data
+
+
+# Step 3: Update the Diversity Column
+def update_diversity(toyota_data):
+    diversity_keywords = [
+        "Entravision",
+        "KFPH-S2",
+        "KHOT",
+        "KLNZ",
+        "KNAI",
+        "KOMR",
+        "KQMR",
+        "KTVW",
+        "KTAZ",
+        "KVVA",
+        "Univision",
+    ]
+    toyota_data["Diversity"] = "General"  # Default value
+    toyota_data.loc[
+        toyota_data["Activity Description"].str.contains(
+            "|".join(diversity_keywords), case=False, na=False
+        ),
+        "Diversity",
+    ] = "Hispanic"
+    return toyota_data
+
+
+# Step 4: Modify Dates, Vehicle Series Name, and Claimed Amount
+def modify_dates_and_amounts(toyota_data, coop_data, nielsen_data, YC, MC):
+    new_rows = []
+    for index, row in toyota_data.iterrows():
+        if row["Vehicle Series Name"] != "Brand":
+            coop_matching_row = coop_data[
+                (coop_data["Budget Code"] == row["Budget Code"])
+                & (coop_data["Media Name"] == row["Media Name"])
+            ]
+            if not coop_matching_row.empty:
+                coop_matching_row = coop_matching_row.iloc[0]
+                for category, percentage in coop_matching_row.items():
+                    if category not in ["Budget Code", "Media Name"] and percentage > 0:
+                        new_row = row.copy()
+                        new_row["Vehicle Series Name"] = category
+                        new_row["Claimed Amount"] = row["Activity Cost"] * percentage
+                        new_rows.append(new_row)
+                toyota_data = toyota_data.drop(index)
+
+    # Update the Activity Start Date and Activity End Date based on the Nielsen Calendar data
+    nielsen_calendar = nielsen_data[
+        (nielsen_data["Month"] == int(MC)) & (nielsen_data["Year"] == int(YC))
+    ]
+    for index, row in toyota_data.iterrows():
+        if row["Vehicle Series Name"] == "Brand":
+            toyota_data.at[index, "Activity Start Date"] = (
+                nielsen_calendar["Start Date"].dt.strftime("%m-%d-%Y").values[0]
+            )
+            toyota_data.at[index, "Activity End Date"] = (
+                nielsen_calendar["End Date"].dt.strftime("%m-%d-%Y").values[0]
+            )
+
+    toyota_data = toyota_data.append(new_rows, ignore_index=True)
+    return toyota_data
+
+
+# Save to Excel with currency formatting
+def save_to_excel(toyota_data, output):
+    # Step 1: Save the DataFrame to an Excel file stored in a BytesIO object
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        toyota_data.to_excel(writer, index=False)
+
+    # Step 2: Load the workbook from the BytesIO object
+    output.seek(0)
+    wb = load_workbook(output)
+    ws = wb.active
+
+    # Step 3: Apply currency formatting
+    currency_style = NamedStyle(name="currency", number_format="$#,##0.00")
+    for row in ws.iter_rows(
+        min_row=2, max_row=ws.max_row, min_col=7, max_col=9
+    ):  # Columns G to I
+        for cell in row:
+            cell.style = currency_style
+
+    # Step 4: Save the workbook back to the BytesIO object
+    output.seek(0)
+    wb.save(output)
+    output.seek(0)
+
+
 @app.route("/")
 def index():
     return {"STATUS": "OK", "CODE": 200}
+
+
+@app.route("/toyota_media_buy_processing")
+def toyota_media_buy_processing():
+    YC = request.form.get("YC")
+    MC = request.form.get("MC")
+    toyota_data, coop_data, nielsen_data = load_data()
+    toyota_data = modify_media_and_budget(toyota_data, YC)
+    toyota_data = update_campaign(toyota_data, YC, MC)
+    toyota_data = update_diversity(toyota_data)
+    toyota_data = modify_dates_and_amounts(toyota_data, coop_data, nielsen_data, YC, MC)
+    # Use BytesIO instead of saving to disk
+    output = io.BytesIO()
+    save_to_excel(toyota_data, output)
+
+    # Set the file pointer to the beginning
+    output.seek(0)
+
+    # Create a filename including the current month and year
+    from datetime import datetime
+
+    current_month = datetime.now().strftime("%B")
+    current_year = datetime.now().year
+    filename = f"Toyota E Submission - Final - {current_month}-{current_year}.xlsx"
+
+    # Return the Excel file
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/ai_prompt_download")
+def download_file():
+    file_path = "./ai_prompt_download/AI_Prompt_Files.zip"
+    return send_file(file_path, as_attachment=True)
 
 
 @app.route("/heatmap/result/<filename>")
@@ -148,10 +354,9 @@ def generate_heatmap():
         # Now, use the saved file path in your existing code
         excel_path = filepath
 
-        if filename.rsplit(".", 1)[1].lower() == "csv":
-            input_df = pd.read_csv(excel_path)
-        else:
-            input_df = pd.read_excel(excel_path)
+        input_df = preprocess_data(
+            excel_path, exclude_index=int(request.form.get("zip_col"))
+        )
 
         main_col = int(request.form.get("main_col"))
         zip_col = int(request.form.get("zip_col"))
