@@ -155,16 +155,6 @@ def convert_to_number(val):
         return "0"
 
 
-# Load the data
-def load_data():
-    toyota_data = pd.read_excel("Toyota E Submission V2- June 2023.xlsx", skiprows=1)
-    coop_data = pd.read_excel("2023 Co-op model rotation.xlsx").drop(
-        columns=["Total"], errors="ignore"
-    )
-    nielsen_data = pd.read_excel("Nielsen Calendar.xlsx")
-    return toyota_data, coop_data, nielsen_data
-
-
 # Step 1: Modify Media Name and Budget Code
 def modify_media_and_budget(toyota_data, YC):
     toyota_data["Media Name"] = toyota_data["Media Name"].replace(
@@ -245,8 +235,8 @@ def modify_dates_and_amounts(toyota_data, coop_data, nielsen_data, YC, MC):
             toyota_data.at[index, "Activity End Date"] = (
                 nielsen_calendar["End Date"].dt.strftime("%m-%d-%Y").values[0]
             )
-
-    toyota_data = toyota_data.append(new_rows, ignore_index=True)
+    new_rows_df = pd.DataFrame(new_rows)
+    toyota_data = pd.concat([toyota_data, new_rows_df], ignore_index=True)
     return toyota_data
 
 
@@ -275,41 +265,76 @@ def save_to_excel(toyota_data, output):
     output.seek(0)
 
 
+# Load the data
+def load_data():
+    nielsen_data = pd.read_excel("./toyota/files/NielsenCalendar.xlsx")
+    return nielsen_data
+
+
 @app.route("/")
 def index():
     return {"STATUS": "OK", "CODE": 200}
 
 
-@app.route("/toyota_media_buy_processing")
+@app.route("/toyota_media_buy_processing", methods=["POST"])
 def toyota_media_buy_processing():
     YC = request.form.get("YC")
     MC = request.form.get("MC")
-    toyota_data, coop_data, nielsen_data = load_data()
-    toyota_data = modify_media_and_budget(toyota_data, YC)
-    toyota_data = update_campaign(toyota_data, YC, MC)
-    toyota_data = update_diversity(toyota_data)
-    toyota_data = modify_dates_and_amounts(toyota_data, coop_data, nielsen_data, YC, MC)
-    # Use BytesIO instead of saving to disk
-    output = io.BytesIO()
-    save_to_excel(toyota_data, output)
+    toyota_file = request.files["toyota_data"]
+    coop_file = request.files["coop_data"]
 
-    # Set the file pointer to the beginning
-    output.seek(0)
+    if (
+        toyota_file
+        and coop_file
+        and allowed_file(toyota_file.filename)
+        and allowed_file(coop_file.filename)
+    ):
+        toyota_filename = secure_filename(toyota_file.filename)
+        coop_filename = secure_filename(coop_file.filename)
 
-    # Create a filename including the current month and year
-    from datetime import datetime
+        toyota_filepath = os.path.join("./toyota/files", toyota_filename)
+        coop_filepath = os.path.join("./toyota/files", coop_filename)
 
-    current_month = datetime.now().strftime("%B")
-    current_year = datetime.now().year
-    filename = f"Toyota E Submission - Final - {current_month}-{current_year}.xlsx"
+        toyota_file.save(toyota_filepath)
+        coop_file.save(coop_filepath)
 
-    # Return the Excel file
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name=filename,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        nielsen_data = load_data()
+        toyota_data = pd.read_excel(toyota_filepath, skiprows=1)
+        coop_data = pd.read_excel(coop_filepath).drop(
+            columns=["Total"], errors="ignore"
+        )
+        toyota_data = modify_media_and_budget(toyota_data, YC)
+        toyota_data = update_campaign(toyota_data, YC, MC)
+        toyota_data = update_diversity(toyota_data)
+        toyota_data = modify_dates_and_amounts(
+            toyota_data, coop_data, nielsen_data, YC, MC
+        )
+        # Use BytesIO instead of saving to disk
+        output = io.BytesIO()
+        save_to_excel(toyota_data, output)
+
+        # Set the file pointer to the beginning
+        output.seek(0)
+
+        # Create a filename including the current month and year
+        from datetime import datetime
+
+        current_month = datetime.now().strftime("%B")
+        current_year = datetime.now().year
+        filename = f"Toyota E Submission - Final - {current_month}-{current_year}.xlsx"
+
+        os.remove(toyota_filepath)
+        os.remove(coop_filepath)
+
+        # Return the Excel file
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        return jsonify({"error": "File Error(s)"}), 400
 
 
 @app.route("/ai_prompt_download")
