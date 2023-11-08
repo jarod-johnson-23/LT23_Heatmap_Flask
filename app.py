@@ -1,20 +1,121 @@
 import os
 import io
 import uuid
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, make_response
 import pandas as pd
 import geopandas as gpd
 import folium
 from folium import Choropleth
 import json
+from flask_bcrypt import Bcrypt
 from werkzeug.utils import secure_filename
 from datetime import timedelta
 from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle
+from pymongo.mongo_client import MongoClient
+from pymongo.errors import DuplicateKeyError
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
+)
+from itsdangerous import SignatureExpired, BadSignature, URLSafeTimedSerializer
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
+bcrypt = Bcrypt(app)
+
+# Configure Flask-PyMongo
+mongo_uri = "mongodb+srv://root:7Q8rCm9iFrC2zofi@cluster0.ft9jkhd.mongodb.net/?retryWrites=true&w=majority"
+client = MongoClient(mongo_uri)
+db = client["LT-db-dashboard"]
+user_collection = db["userInfo"]
+user_collection.create_index("email", unique=True)
+
+app.config["TOKEN_KEY"] = "19496De6s!"
+
+app.config["JWT_SECRET_KEY"] = "secret_key"
+# app.config["JWT_SECRET_KEY"] = os.environ.get(
+# "JWT_SECRET_KEY", ""
+# )  # Change this to a random secret key
+jwt = JWTManager(app)
+serializer = URLSafeTimedSerializer(app.config["TOKEN_KEY"])
+
+
+@app.route("/user/register", methods=["POST"])
+def register():
+    try:
+        user = {
+            "email": request.json.get("email"),
+            "password": bcrypt.generate_password_hash(
+                request.json.get("password")
+            ).decode("utf-8"),
+            "access": {"heatmap": True},
+        }
+        result = user_collection.insert_one(user)
+        access_token = create_access_token(identity=request.json.get("email"))
+        return jsonify({"msg": "Success", "token": access_token}), 200
+    except DuplicateKeyError:
+        return jsonify({"error": "Duplicate email"}), 409
+    except Exception as e:
+        print(e)
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/user/login", methods=["POST"])
+def login():
+    email = request.json.get("email")
+    password = request.json.get("password")
+    user = user_collection.find_one({"email": email})
+    if user and bcrypt.check_password_hash(user["password"], password):
+        access_token = create_access_token(identity=email)
+        return jsonify(access_token=access_token, access=user["access"]), 200
+    else:
+        return jsonify({"msg": "Bad email or password"}), 401
+
+
+@app.route("/send-email", methods=["POST"])
+def send_email():
+    email = request.json.get("email")
+
+    # Generate a secure token
+    token = serializer.dumps(email, salt="LT-Dashboard-Salt")
+
+    # Create a link to the account creation page with the token
+    link = f"http://localhost:3000/create-account/{token}"
+
+    # Email content with the link
+    email_body = f"Please click on the link to create your account: {link}"
+
+    # Code to send the email using SES
+    # ...
+
+    return jsonify({"link": link}), 200
+
+
+@app.route("/verify-token/<token>", methods=["GET"])
+def verify_token(token):
+    try:
+        email = serializer.loads(
+            token, salt="LT-Dashboard-Salt", max_age=36000  # Token expires after 1 hour
+        )
+    except SignatureExpired:
+        return jsonify({"error": "Token expired"}), 400
+    except BadSignature:
+        return jsonify({"error": "Invalid token"}), 400
+
+    # Token is valid, continue with the account creation process
+    return jsonify({"message": "Token is valid", "email": email}), 200
+
+
+@app.route("/protected", methods=["GET"])
+@jwt_required()
+def protected():
+    current_user = get_jwt_identity()
+    return jsonify(logged_in_as=current_user), 200
+
 
 # Directory to save the generated heatmaps
 HEATMAP_DIR = "./heatmap/result"
@@ -228,40 +329,39 @@ def modify_dates_and_amounts(toyota_data, coop_data, nielsen_data, YC, MC):
         (nielsen_data["Month"] == int(MC)) & (nielsen_data["Year"] == int(YC))
     ]
     for index, row in toyota_data.iterrows():
-        if row["Vehicle Series Name"] == "Brand":
-            toyota_data.at[index, "Activity Start Date"] = (
-                nielsen_calendar["Start Date"].dt.strftime("%m-%d-%Y").values[0]
-            )
-            toyota_data.at[index, "Activity End Date"] = (
-                nielsen_calendar["End Date"].dt.strftime("%m-%d-%Y").values[0]
-            )
+        toyota_data.at[index, "Activity Start Date"] = (
+            nielsen_calendar["Start Date"].dt.strftime("%m-%d-%Y").values[0]
+        )
+        toyota_data.at[index, "Activity End Date"] = (
+            nielsen_calendar["End Date"].dt.strftime("%m-%d-%Y").values[0]
+        )
+        toyota_data.at[index, "Claimed Amount"] = toyota_data.at[index, "Activity Cost"]
+        toyota_data.at[index, "Vehicle Series Name"] = "Brand"
+
     new_rows_df = pd.DataFrame(new_rows)
     toyota_data = pd.concat([toyota_data, new_rows_df], ignore_index=True)
+
     return toyota_data
 
 
-# Save to Excel with currency formatting
 def save_to_excel(toyota_data, output):
     # Step 1: Save the DataFrame to an Excel file stored in a BytesIO object
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         toyota_data.to_excel(writer, index=False)
+        wb = writer.book
+        ws = writer.sheets["Sheet1"]
 
-    # Step 2: Load the workbook from the BytesIO object
-    output.seek(0)
-    wb = load_workbook(output)
-    ws = wb.active
+        # Step 2: Apply currency formatting
+        currency_style = NamedStyle(name="currency", number_format="$#,##0.00")
+        wb.add_named_style(currency_style)
 
-    # Step 3: Apply currency formatting
-    currency_style = NamedStyle(name="currency", number_format="$#,##0.00")
-    for row in ws.iter_rows(
-        min_row=2, max_row=ws.max_row, min_col=7, max_col=9
-    ):  # Columns G to I
-        for cell in row:
-            cell.style = currency_style
+        for row in ws.iter_rows(
+            min_row=2, max_row=ws.max_row, min_col=7, max_col=9
+        ):  # Columns G to I
+            for cell in row:
+                cell.style = currency_style
 
-    # Step 4: Save the workbook back to the BytesIO object
-    output.seek(0)
-    wb.save(output)
+    # The workbook is saved when exiting the context manager
     output.seek(0)
 
 
@@ -278,63 +378,59 @@ def index():
 
 @app.route("/toyota_media_buy_processing", methods=["POST"])
 def toyota_media_buy_processing():
-    YC = request.form.get("YC")
-    MC = request.form.get("MC")
-    toyota_file = request.files["toyota_data"]
-    coop_file = request.files["coop_data"]
+    try:
+        YC = request.form.get("YC")
+        MC = request.form.get("MC")
 
-    if (
-        toyota_file
-        and coop_file
-        and allowed_file(toyota_file.filename)
-        and allowed_file(coop_file.filename)
-    ):
-        toyota_filename = secure_filename(toyota_file.filename)
-        coop_filename = secure_filename(coop_file.filename)
+        toyota_file = request.files.get("toyota_file")
+        coop_file = request.files.get("coop_file")
 
-        toyota_filepath = os.path.join("./toyota/files", toyota_filename)
-        coop_filepath = os.path.join("./toyota/files", coop_filename)
+        if toyota_file and coop_file and YC and MC:
+            toyota_filename = secure_filename(toyota_file.filename)
+            coop_filename = secure_filename(coop_file.filename)
 
-        toyota_file.save(toyota_filepath)
-        coop_file.save(coop_filepath)
+            toyota_filepath = os.path.join("./toyota/files", toyota_filename)
+            coop_filepath = os.path.join("./toyota/files", coop_filename)
 
-        nielsen_data = load_data()
-        toyota_data = pd.read_excel(toyota_filepath, skiprows=1)
-        coop_data = pd.read_excel(coop_filepath).drop(
-            columns=["Total"], errors="ignore"
-        )
-        toyota_data = modify_media_and_budget(toyota_data, YC)
-        toyota_data = update_campaign(toyota_data, YC, MC)
-        toyota_data = update_diversity(toyota_data)
-        toyota_data = modify_dates_and_amounts(
-            toyota_data, coop_data, nielsen_data, YC, MC
-        )
-        # Use BytesIO instead of saving to disk
-        output = io.BytesIO()
-        save_to_excel(toyota_data, output)
+            toyota_file.save(toyota_filepath)
+            coop_file.save(coop_filepath)
 
-        # Set the file pointer to the beginning
-        output.seek(0)
+            nielsen_data = load_data()
+            toyota_data = pd.read_excel(toyota_filepath, skiprows=1)
+            coop_data = pd.read_excel(coop_filepath).drop(
+                columns=["Total"], errors="ignore"
+            )
+            toyota_data = modify_media_and_budget(toyota_data, YC)
+            toyota_data = update_campaign(toyota_data, YC, MC)
+            toyota_data = update_diversity(toyota_data)
+            toyota_data = modify_dates_and_amounts(
+                toyota_data, coop_data, nielsen_data, YC, MC
+            )
 
-        # Create a filename including the current month and year
-        from datetime import datetime
+            os.remove(toyota_filepath)
+            os.remove(coop_filepath)
 
-        current_month = datetime.now().strftime("%B")
-        current_year = datetime.now().year
-        filename = f"Toyota E Submission - Final - {current_month}-{current_year}.xlsx"
+            # file_path = "./toyota/files/toyota_data.xlsx"
+            # toyota_data.to_excel(file_path, index=False, engine="openpyxl")
 
-        os.remove(toyota_filepath)
-        os.remove(coop_filepath)
+            output = io.BytesIO()
+            save_to_excel(toyota_data, output)
 
-        # Return the Excel file
-        return send_file(
-            output,
-            as_attachment=True,
-            download_name=filename,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    else:
-        return jsonify({"error": "File Error(s)"}), 400
+            # Send the Excel file to the user
+            return send_file(
+                output,
+                as_attachment=True,
+                download_name="toyota_data.xlsx",
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            return jsonify({"error": "File Error(s)"}), 412
+    except Exception as e:
+        # Log the exception for debugging
+        app.logger.error(f"An error occurred: {str(e)}")
+
+        # Return a JSON response indicating an error
+        return jsonify({"error": "An error occurred", "message": str(e)}), 500
 
 
 @app.route("/ai_prompt_download")
@@ -522,7 +618,7 @@ def generate_heatmap():
         return jsonify(
             {
                 "status": "success",
-                "heatmap_url": f"https://py.laneterraleverapi.org/heatmap/result/{file_prefix}_{unique_filename}",
+                "heatmap_url": f"http://localhost:5000/heatmap/result/{file_prefix}_{unique_filename}",
             }
         )
     else:
