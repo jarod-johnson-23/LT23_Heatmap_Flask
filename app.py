@@ -9,8 +9,6 @@ from folium import Choropleth
 import json
 from flask_bcrypt import Bcrypt
 from werkzeug.utils import secure_filename
-from datetime import timedelta
-from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle
 from pymongo.mongo_client import MongoClient
 from pymongo.errors import DuplicateKeyError
@@ -24,7 +22,11 @@ from itsdangerous import SignatureExpired, BadSignature, URLSafeTimedSerializer
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(
+    app,
+    resources={r"/*": {"origins": "http://localhost:3000"}},
+    supports_credentials=True,
+)
 bcrypt = Bcrypt(app)
 
 # Configure Flask-PyMongo
@@ -71,7 +73,7 @@ def login():
     user = user_collection.find_one({"email": email})
     if user and bcrypt.check_password_hash(user["password"], password):
         access_token = create_access_token(identity=email)
-        return jsonify(access_token=access_token, access=user["access"]), 200
+        return jsonify(access_token=access_token, id=user["_id"]), 200
     else:
         return jsonify({"msg": "Bad email or password"}), 401
 
@@ -99,7 +101,9 @@ def send_email():
 def verify_token(token):
     try:
         email = serializer.loads(
-            token, salt="LT-Dashboard-Salt", max_age=36000  # Token expires after 1 hour
+            token,
+            salt="LT-Dashboard-Salt",
+            max_age=36000,  # Token expires after 10 hours
         )
     except SignatureExpired:
         return jsonify({"error": "Token expired"}), 400
@@ -239,19 +243,7 @@ def convert_to_number(val):
     # Try converting to a number
     try:
         number = float(val)
-
         return number
-
-        # # If it's a whole number, return as integer with commas
-        # if number.is_integer():
-        #     return "{:,.0f}".format(number)
-        # # If it has decimals, return with commas and retain original decimal places
-        # else:
-        #     # Convert the number to string and count the number of decimal places
-        #     decimal_places = len(str(number).split(".")[1])
-        #     format_string = "{:,.%df}" % decimal_places
-        #     return format_string.format(number)
-
     except ValueError:
         return "0"
 
