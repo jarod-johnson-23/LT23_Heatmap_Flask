@@ -49,7 +49,7 @@ serializer = URLSafeTimedSerializer(app.config["TOKEN_KEY"])
 @app.route("/admin/create-user", methods=["POST"])
 def admin_create_user():
     email = request.json.get("email")
-    access = request.json.get("access")  # Presuming the admin sends this
+    access = request.json.get("accessRights")  # Presuming the admin sends this
 
     # Check if email was provided
     if not email:
@@ -194,6 +194,23 @@ def verify_token(token):
 
     # Token is valid, continue with the account creation process
     return jsonify({"message": "Token is valid", "email": email}), 200
+
+
+@app.route("/users", methods=["GET"])
+def get_all_users():
+    try:
+        # Query all user documents excluding the "password" field
+        users = user_collection.find({}, {"password": 0})
+        user_list = list(users)
+
+        # Convert the ObjectId fields to strings to make them JSON serializable
+        for user in user_list:
+            user["_id"] = str(user["_id"])
+
+        return jsonify(user_list), 200
+    except Exception as e:
+        print(e)
+        return jsonify({"error": "An error occurred fetching the user data."}), 500
 
 
 @app.route("/protected", methods=["GET"])
