@@ -46,19 +46,79 @@ jwt = JWTManager(app)
 serializer = URLSafeTimedSerializer(app.config["TOKEN_KEY"])
 
 
-@app.route("/user/register", methods=["POST"])
-def register():
+@app.route("/admin/create-user", methods=["POST"])
+def admin_create_user():
+    email = request.json.get("email")
+    access = request.json.get("access")  # Presuming the admin sends this
+
+    # Check if email was provided
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
     try:
         user = {
-            "email": request.json.get("email"),
-            "password": bcrypt.generate_password_hash(
-                request.json.get("password")
-            ).decode("utf-8"),
-            "access": {"heatmap": True},
+            "email": email,
+            "access": access,
+            "setupComplete": False,  # Indicates the user has not completed the setup
         }
+
+        # Insert the user into the database
         result = user_collection.insert_one(user)
-        access_token = create_access_token(identity=request.json.get("email"))
-        return jsonify({"msg": "Success", "token": access_token}), 200
+        # TODO: Trigger email to user with the account setup link
+
+        token = serializer.dumps(email, salt="LT-Dashboard-Salt")
+
+        # Create a link to the account creation page with the token
+        link = f"http://localhost:3000/create-account/{token}"
+
+        # Email content with the link
+        email_body = f"Please click on the link to create your account: {link}"
+
+        return jsonify({"msg": link}), 201
+
+    except DuplicateKeyError:
+        return jsonify({"error": "Duplicate email"}), 409
+    except Exception as e:
+        print(e)
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/user/register", methods=["POST"])
+def user_complete_setup():
+    email = request.json.get(
+        "email"
+    )  # User should submit their email to match the right entry
+    password = request.json.get("password")
+    first_name = request.json.get("firstName", "")
+    last_name = request.json.get("lastName", "")
+    role = request.json.get("role", "")
+
+    # Validate that the required email and password have been provided
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+
+    try:
+        hashed_password = bcrypt.generate_password_hash(password).decode("utf-8")
+
+        update_result = user_collection.update_one(
+            {"email": email, "setupComplete": False},
+            {
+                "$set": {
+                    "password": hashed_password,
+                    "firstName": first_name,
+                    "lastName": last_name,
+                    "role": role,
+                    "setupComplete": True,  # Mark the setup as complete
+                }
+            },
+        )
+
+        if update_result.matched_count == 0:
+            return jsonify({"error": "No user found or setup already complete"}), 404
+
+        access_token = create_access_token(identity=email)
+        return jsonify({"msg": "Account setup complete", "token": access_token}), 200
+
     except DuplicateKeyError:
         return jsonify({"error": "Duplicate email"}), 409
     except Exception as e:
@@ -70,10 +130,14 @@ def register():
 def login():
     email = request.json.get("email")
     password = request.json.get("password")
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+    if not password:
+        return jsonify({"error": "Password is required"}), 400
     user = user_collection.find_one({"email": email})
     if user and bcrypt.check_password_hash(user["password"], password):
         access_token = create_access_token(identity=email)
-        return jsonify(access_token=access_token, id=user["_id"]), 200
+        return jsonify(access_token=access_token, id=str(user["_id"])), 200
     else:
         return jsonify({"msg": "Bad email or password"}), 401
 
@@ -97,6 +161,24 @@ def send_email():
     return jsonify({"link": link}), 200
 
 
+@app.route("/get_access", methods=["POST"])
+def get_access():
+    data = request.json
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"message": "Email is required."}), 400
+
+    # Query the database
+    result = user_collection.find_one({"email": email}, {"access": 1, "_id": 0})
+
+    # Check if a result was found
+    if result:
+        return jsonify(result), 200
+    else:
+        return jsonify({"message": "No user found with that email."}), 404
+
+
 @app.route("/verify-token/<token>", methods=["GET"])
 def verify_token(token):
     try:
@@ -118,7 +200,7 @@ def verify_token(token):
 @jwt_required()
 def protected():
     current_user = get_jwt_identity()
-    return jsonify(logged_in_as=current_user), 200
+    return jsonify({"logged_in_as": current_user}), 200
 
 
 # Directory to save the generated heatmaps
