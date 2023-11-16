@@ -10,7 +10,8 @@ import json
 from flask_bcrypt import Bcrypt
 from werkzeug.utils import secure_filename
 from openpyxl.styles import NamedStyle
-from pymongo.mongo_client import MongoClient
+from pymongo import MongoClient
+from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from flask_jwt_extended import (
     JWTManager,
@@ -74,7 +75,11 @@ def admin_create_user():
         # Email content with the link
         email_body = f"Please click on the link to create your account: {link}"
 
-        return jsonify({"msg": link}), 201
+        user_id = result.inserted_id
+
+        # Return the ObjectId as a string in the response
+        # Since ObjectId is not JSON serializable, we convert it to string
+        return jsonify({"msg": link, "_id": str(user_id)}), 201
 
     except DuplicateKeyError:
         return jsonify({"error": "Duplicate email"}), 409
@@ -211,6 +216,44 @@ def get_all_users():
     except Exception as e:
         print(e)
         return jsonify({"error": "An error occurred fetching the user data."}), 500
+
+
+@app.route("/users/<user_id>/update-access", methods=["PATCH"])
+def update_user_access(user_id):
+    try:
+        access_rights = request.json.get("access")
+        result = user_collection.update_one(
+            {"_id": ObjectId(user_id)}, {"$set": {"access": access_rights}}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "No user found with provided ID."}), 404
+        elif result.modified_count == 0:
+            return jsonify({"error": "User access rights not updated."}), 304
+        else:
+            return jsonify({"message": "User access rights updated successfully."}), 200
+    except Exception as e:
+        print(e)
+        return (
+            jsonify({"error": "An error occurred updating the user access rights."}),
+            500,
+        )
+
+
+@app.route("/users/<user_id>/delete", methods=["DELETE"])
+def delete_user(user_id):
+    try:
+        result = user_collection.delete_one({"_id": ObjectId(user_id)})
+        if result.deleted_count == 0:
+            return jsonify({"error": "User not found."}), 404
+        else:
+            return jsonify({"message": "User deleted successfully."}), 200
+    except Exception as e:
+        print(e)
+        return (
+            jsonify({"error": "An error occurred while trying to delete the user."}),
+            500,
+        )
 
 
 @app.route("/protected", methods=["GET"])
