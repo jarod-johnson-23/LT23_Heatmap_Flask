@@ -1,6 +1,7 @@
 import os
 import io
 import uuid
+import base64
 from flask import Flask, request, jsonify, send_from_directory, send_file, make_response
 import pandas as pd
 import geopandas as gpd
@@ -37,9 +38,29 @@ db = client["LT-db-dashboard"]
 user_collection = db["userInfo"]
 user_collection.create_index("email", unique=True)
 
-app.config["TOKEN_KEY"] = "19496De6s!"
+# app.config["MAIL_SERVER"] = "smtp.lt.agency"  # The SMTP server domain
+# app.config["MAIL_PORT"] = 465  # Typically, 587 for TLS or 465 for SSL
+# app.config["MAIL_USE_TLS"] = False  # Use TLS
+# app.config["MAIL_USE_SSL"] = True  # Use SSL (pick TLS or SSL, not both)
+# app.config["MAIL_USERNAME"] = "jarod.johnson@lt.agency"
+# app.config["MAIL_PASSWORD"] = "JJaug23LT"
+# app.config["MAIL_DEFAULT_SENDER"] = "jarod.johnson@lt.agency"
+#
+# mail = Mail(app)
 
-app.config["JWT_SECRET_KEY"] = "secret_key"
+app.config["TOKEN_KEY"] = "YAPOrj4oXgEe5Fme7kCMLh85"
+
+
+def generate_jwt_secret_key(length=64):
+    # Generate random bytes
+    random_bytes = os.urandom(length)
+    # Base64 encode the bytes to create a URL-safe secret key
+    secret_key = base64.urlsafe_b64encode(random_bytes).decode("utf-8")
+    return secret_key
+
+
+app.config["JWT_SECRET_KEY"] = generate_jwt_secret_key()
+
 # app.config["JWT_SECRET_KEY"] = os.environ.get(
 # "JWT_SECRET_KEY", ""
 # )  # Change this to a random secret key
@@ -159,9 +180,6 @@ def send_email():
 
     # Email content with the link
     email_body = f"Please click on the link to create your account: {link}"
-
-    # Code to send the email using SES
-    # ...
 
     return jsonify({"link": link}), 200
 
