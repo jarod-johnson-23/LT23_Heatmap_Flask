@@ -14,6 +14,8 @@ from openpyxl.styles import NamedStyle
 from pymongo import MongoClient
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
+import boto3
+from botocore.exceptions import ClientError
 from flask_jwt_extended import (
     JWTManager,
     create_access_token,
@@ -21,34 +23,26 @@ from flask_jwt_extended import (
     get_jwt_identity,
 )
 from itsdangerous import SignatureExpired, BadSignature, URLSafeTimedSerializer
+from dotenv import load_dotenv
 from flask_cors import CORS
 
 app = Flask(__name__)
+load_dotenv()
 CORS(
     app,
-    resources={r"/*": {"origins": "http://localhost:3000"}},
+    resources={r"/*": {"origins": os.getenv("base_url_react")}},
     supports_credentials=True,
 )
 bcrypt = Bcrypt(app)
 
 # Configure Flask-PyMongo
-mongo_uri = "mongodb+srv://root:7Q8rCm9iFrC2zofi@cluster0.ft9jkhd.mongodb.net/?retryWrites=true&w=majority"
+mongo_uri = os.getenv("mongo_uri")
 client = MongoClient(mongo_uri)
 db = client["LT-db-dashboard"]
 user_collection = db["userInfo"]
 user_collection.create_index("email", unique=True)
 
-# app.config["MAIL_SERVER"] = "smtp.lt.agency"  # The SMTP server domain
-# app.config["MAIL_PORT"] = 465  # Typically, 587 for TLS or 465 for SSL
-# app.config["MAIL_USE_TLS"] = False  # Use TLS
-# app.config["MAIL_USE_SSL"] = True  # Use SSL (pick TLS or SSL, not both)
-# app.config["MAIL_USERNAME"] = "jarod.johnson@lt.agency"
-# app.config["MAIL_PASSWORD"] = "JJaug23LT"
-# app.config["MAIL_DEFAULT_SENDER"] = "jarod.johnson@lt.agency"
-#
-# mail = Mail(app)
-
-app.config["TOKEN_KEY"] = "YAPOrj4oXgEe5Fme7kCMLh85"
+app.config["TOKEN_KEY"] = os.getenv("TOKEN_KEY")
 
 
 def generate_jwt_secret_key(length=64):
@@ -60,10 +54,6 @@ def generate_jwt_secret_key(length=64):
 
 
 app.config["JWT_SECRET_KEY"] = generate_jwt_secret_key()
-
-# app.config["JWT_SECRET_KEY"] = os.environ.get(
-# "JWT_SECRET_KEY", ""
-# )  # Change this to a random secret key
 jwt = JWTManager(app)
 serializer = URLSafeTimedSerializer(app.config["TOKEN_KEY"])
 
@@ -88,14 +78,48 @@ def admin_create_user():
         result = user_collection.insert_one(user)
         # TODO: Trigger email to user with the account setup link
 
-        token = serializer.dumps(email, salt="LT-Dashboard-Salt")
+        token = serializer.dumps(email, salt=os.getenv("salt"))
 
         # Create a link to the account creation page with the token
-        link = f"http://localhost:3000/create-account/{token}"
+        link = f"{os.getenv('base_url_react')}/create-account/{token}"
 
         # Email content with the link
-        email_body = f"Please click on the link to create your account: {link}"
+        email_body = f"""To complete your sign up and gain access, simply click on the following link and follow the instructions to create your account: {link}\nPlease note that this invitation link is uniquely tied to your email address, sharing it with others will result in an account under your email address. If you need to use a different email address, please contact the DEV team. The invitation link will expire in 10 hours."""
 
+        aws_region = "us-east-2"
+
+        # Create a new SES resource and specify a region.
+        client = boto3.client(
+            "ses",
+            region_name=aws_region,
+            aws_access_key_id=os.getenv("aws_access_key_id"),
+            aws_secret_access_key=os.getenv("aws_secret_access_key"),
+        )
+
+        try:
+            # Provide the contents of the email.
+            response = client.send_email(
+                Destination={
+                    "ToAddresses": [email],
+                },
+                Message={
+                    "Body": {
+                        "Text": {
+                            "Charset": "UTF-8",
+                            "Data": email_body,
+                        },
+                    },
+                    "Subject": {
+                        "Charset": "UTF-8",
+                        "Data": "",
+                    },
+                },
+                Source="jarod.johnson@lt.agency",  # Your verified address
+            )
+        except ClientError as e:
+            print(f"An error occurred: {e.response['Error']['Message']}")
+        else:
+            print(f"Email sent! Message ID: {response['MessageId']}")
         user_id = result.inserted_id
 
         # Return the ObjectId as a string in the response
@@ -111,9 +135,7 @@ def admin_create_user():
 
 @app.route("/user/register", methods=["POST"])
 def user_complete_setup():
-    email = request.json.get(
-        "email"
-    )  # User should submit their email to match the right entry
+    email = request.json.get("email")
     password = request.json.get("password")
     first_name = request.json.get("firstName", "")
     last_name = request.json.get("lastName", "")
@@ -168,20 +190,55 @@ def login():
         return jsonify({"msg": "Bad email or password"}), 401
 
 
-@app.route("/send-email", methods=["POST"])
-def send_email():
-    email = request.json.get("email")
+# @app.route("/send-email", methods=["POST"])
+# def send_email():
+#     email = request.json.get("email")
 
-    # Generate a secure token
-    token = serializer.dumps(email, salt="LT-Dashboard-Salt")
+#     # Generate a secure token
+#     token = serializer.dumps(email, salt=os.getenv("salt"))
 
-    # Create a link to the account creation page with the token
-    link = f"http://localhost:3000/create-account/{token}"
+#     # Create a link to the account creation page with the token
+#     link = f"{os.getenv('base_url_react')}/create-account/{token}"
 
-    # Email content with the link
-    email_body = f"Please click on the link to create your account: {link}"
+#     # Email content with the link
+#     email_body = f"""To complete your sign up and gain access, simply click on the following link and follow the instructions to create your account: {link}\nPlease note that this invitation link is uniquely tied to your email address, sharing it with others will result in an account under your email address. If you need to use a different email address, please contact the DEV team. The invitation link will expire in 10 hours."""
 
-    return jsonify({"link": link}), 200
+#     aws_region = "us-east-2"
+
+#     # Create a new SES resource and specify a region.
+#     client = boto3.client(
+#         "ses",
+#         region_name=aws_region,
+#         aws_access_key_id="AKIA4QUNTSRVYBI2XNFT",
+#         aws_secret_access_key="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",
+#     )
+
+#     try:
+#         # Provide the contents of the email.
+#         response = client.send_email(
+#             Destination={
+#                 "ToAddresses": [email],
+#             },
+#             Message={
+#                 "Body": {
+#                     "Text": {
+#                         "Charset": "UTF-8",
+#                         "Data": email_body,
+#                     },
+#                 },
+#                 "Subject": {
+#                     "Charset": "UTF-8",
+#                     "Data": "",
+#                 },
+#             },
+#             Source="jarod.johnson@lt.agency",  # Your verified address
+#         )
+#     except ClientError as e:
+#         print(f"An error occurred: {e.response['Error']['Message']}")
+#     else:
+#         print(f"Email sent! Message ID: {response['MessageId']}")
+
+#     return jsonify({"link": link}), 200
 
 
 @app.route("/get_access", methods=["POST"])
@@ -207,7 +264,7 @@ def verify_token(token):
     try:
         email = serializer.loads(
             token,
-            salt="LT-Dashboard-Salt",
+            salt=os.getenv("salt"),
             max_age=36000,  # Token expires after 10 hours
         )
     except SignatureExpired:
@@ -770,7 +827,7 @@ def generate_heatmap():
         return jsonify(
             {
                 "status": "success",
-                "heatmap_url": f"http://localhost:5000/heatmap/result/{file_prefix}_{unique_filename}",
+                "heatmap_url": f"{os.getenv('base_url_flask')}/heatmap/result/{file_prefix}_{unique_filename}",
             }
         )
     else:
