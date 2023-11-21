@@ -2,7 +2,15 @@ import os
 import io
 import uuid
 import base64
-from flask import Flask, request, jsonify, send_from_directory, send_file, make_response
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    send_from_directory,
+    send_file,
+    make_response,
+    Blueprint,
+)
 import pandas as pd
 import geopandas as gpd
 import folium
@@ -189,57 +197,6 @@ def login():
         return jsonify(access_token=access_token, id=str(user["_id"])), 200
     else:
         return jsonify({"msg": "Bad email or password"}), 401
-
-
-# @app.route("/send-email", methods=["POST"])
-# def send_email():
-#     email = request.json.get("email")
-
-#     # Generate a secure token
-#     token = serializer.dumps(email, salt=os.getenv("salt"))
-
-#     # Create a link to the account creation page with the token
-#     link = f"{os.getenv('base_url_react')}/create-account/{token}"
-
-#     # Email content with the link
-#     email_body = f"""To complete your sign up and gain access, simply click on the following link and follow the instructions to create your account: {link}\nPlease note that this invitation link is uniquely tied to your email address, sharing it with others will result in an account under your email address. If you need to use a different email address, please contact the DEV team. The invitation link will expire in 10 hours."""
-
-#     aws_region = "us-east-2"
-
-#     # Create a new SES resource and specify a region.
-#     client = boto3.client(
-#         "ses",
-#         region_name=aws_region,
-#         aws_access_key_id="AKIA4QUNTSRVYBI2XNFT",
-#         aws_secret_access_key="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",
-#     )
-
-#     try:
-#         # Provide the contents of the email.
-#         response = client.send_email(
-#             Destination={
-#                 "ToAddresses": [email],
-#             },
-#             Message={
-#                 "Body": {
-#                     "Text": {
-#                         "Charset": "UTF-8",
-#                         "Data": email_body,
-#                     },
-#                 },
-#                 "Subject": {
-#                     "Charset": "UTF-8",
-#                     "Data": "",
-#                 },
-#             },
-#             Source="jarod.johnson@lt.agency",  # Your verified address
-#         )
-#     except ClientError as e:
-#         print(f"An error occurred: {e.response['Error']['Message']}")
-#     else:
-#         print(f"Email sent! Message ID: {response['MessageId']}")
-
-#     return jsonify({"link": link}), 200
 
 
 @app.route("/get_access", methods=["POST"])

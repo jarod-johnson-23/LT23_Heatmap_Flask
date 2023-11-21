@@ -4,3 +4,5 @@ __pycache__
 .env
 venv
 requirements.txt
+/heatmap/result/*.html
+!/heatmap/result/default.html
