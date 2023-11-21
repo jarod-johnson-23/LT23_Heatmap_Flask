@@ -2,3 +2,5 @@
 State-zip-code-GeoJSON/
 __pycache__
 .env
+venv
+requirements.txt

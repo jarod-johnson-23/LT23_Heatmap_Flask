@@ -26,6 +26,7 @@ from itsdangerous import SignatureExpired, BadSignature, URLSafeTimedSerializer
 from dotenv import load_dotenv
 from flask_cors import CORS
 
+
 app = Flask(__name__)
 load_dotenv()
 CORS(
