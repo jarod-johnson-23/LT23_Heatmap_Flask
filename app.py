@@ -11,10 +11,12 @@ from flask import (
     make_response,
     Blueprint,
 )
+from openai import OpenAI
 import pandas as pd
 import geopandas as gpd
 import folium
 from folium import Choropleth
+import simplekml
 import json
 from flask_bcrypt import Bcrypt
 from werkzeug.utils import secure_filename
@@ -32,8 +34,12 @@ from flask_jwt_extended import (
 )
 from itsdangerous import SignatureExpired, BadSignature, URLSafeTimedSerializer
 from dotenv import load_dotenv
+from datetime import timedelta
 from flask_cors import CORS
 
+ai_client = OpenAI(
+    organization=os.getenv("openai_organization"), api_key=os.getenv("openai_api_key")
+)
 
 app = Flask(__name__)
 load_dotenv()
@@ -62,6 +68,7 @@ def generate_jwt_secret_key(length=64):
     return secret_key
 
 
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
 app.config["JWT_SECRET_KEY"] = generate_jwt_secret_key()
 jwt = JWTManager(app)
 serializer = URLSafeTimedSerializer(app.config["TOKEN_KEY"])
@@ -120,10 +127,10 @@ def admin_create_user():
                     },
                     "Subject": {
                         "Charset": "UTF-8",
-                        "Data": "",
+                        "Data": "LT Web Service Dashboard Invitation",
                     },
                 },
-                Source="jarod.johnson@lt.agency",  # Your verified address
+                Source="no-reply@laneterraleverapi.org",  # Your verified address
             )
         except ClientError as e:
             print(f"An error occurred: {e.response['Error']['Message']}")
@@ -359,30 +366,6 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def color_scale(value, max_value, min_value):
-    diff = max_value - min_value
-    if value is None:
-        return "#ffffff00"
-    elif value == 0:
-        return "#ffffff00"
-    elif value < (diff * 0.1) + min_value:
-        return "#ffffb2"
-    elif value < (diff * 0.25) + min_value:
-        return "#feda76"
-    elif value < (diff * 0.4) + min_value:
-        return "#f5b156"
-    elif value < (diff * 0.55) + min_value:
-        return "#f59356"
-    elif value < (diff * 0.7) + min_value:
-        return "#f07f64"
-    elif value < (diff * 0.8) + min_value:
-        return "#ec5b45"
-    elif value < (diff * 0.9) + min_value:
-        return "#e73727"
-    else:
-        return "#d7191c"
-
-
 def parse_input(input_str):
     if input_str:
         return list(map(int, input_str.split(",")))
@@ -607,21 +590,188 @@ def download_file():
 
 
 @app.route("/heatmap/result/<filename>")
-def serve_heatmap(filename):
-    # Check there are no path traversals in the file name
+def serve_file(filename):
+    # Modify the function to serve both HTML and KML files with content type checks
+    # Note: Better to have separate endpoints or a middleware that handles different file types
     if ".." in filename or filename.startswith("/"):
         return "Invalid path!", 400
 
-    # Check that it is requesting an HTML file
-    if not filename.endswith(".html"):
-        return "Invalid file type!", 400
-
-    # Check that the file actually exists
-    file_path = os.path.join("./heatmap/result", filename)
+    file_path = os.path.join(HEATMAP_DIR, filename)
     if not os.path.exists(file_path):
         return "File not found!", 404
 
-    return send_from_directory("./heatmap/result", filename)
+    # Infer content type from file extension
+    if filename.endswith(".html"):
+        content_type = "text/html"
+    elif filename.endswith(".kml"):
+        content_type = "application/vnd.google-earth.kml+xml"
+    else:
+        return "Invalid file type!", 400
+
+    return send_from_directory(HEATMAP_DIR, filename, mimetype=content_type)
+
+
+def generate_kml(geojson_data, col_name, other_cols, max_value, min_value, file_prefix):
+    kml = simplekml.Kml()
+
+    for feature in geojson_data["features"]:
+        # Zip code polygons represented as 'MultiPolygon' or 'Polygon' in GeoJSON
+        poly_geojson = feature["geometry"]
+        if poly_geojson["type"] == "MultiPolygon":
+            for polygon in poly_geojson["coordinates"]:
+                create_kml_polygon(
+                    kml, polygon, feature, col_name, other_cols, max_value, min_value
+                )
+        elif poly_geojson["type"] == "Polygon":
+            create_kml_polygon(
+                kml,
+                poly_geojson["coordinates"],
+                feature,
+                col_name,
+                other_cols,
+                max_value,
+                min_value,
+            )
+
+    kml_file_path = os.path.join(HEATMAP_DIR, f"{file_prefix}_{uuid.uuid4().hex}.kml")
+    kml.save(kml_file_path)
+    return kml_file_path
+
+
+def create_kml_polygon(
+    kml, polygon, feature, col_name, other_cols, max_value, min_value
+):
+    poly = kml.newpolygon(name=feature["properties"]["ZCTA5CE10"])
+    # Now let's add a BalloonStyle
+    # Start an HTML table with the column names and values
+    # balloon_html = """
+    # <style type='text/css'>
+    #     .balloon-table {{
+    #         width: 100%;
+    #         border-collapse: collapse;
+    #         font-family: 'Arial', sans-serif;
+    #     }}
+    #     .balloon-table th,
+    #     .balloon-table td {{
+    #         border: 1px solid #ddd;
+    #         padding: 8px;
+    #         text-align: left;
+    #     }}
+    #     .balloon-table th {{
+    #         background-color: #f2f2f2;
+    #         color: #333;
+    #     }}
+    #     .balloon-table tr:nth-child(even) {{
+    #         background-color: #f9f9f9;
+    #     }}
+    # </style>
+    # <p><b>Zip Code:</b> {zip_code}</p>
+    # <table class='balloon-table'>
+    #     <tr>
+    #         <th>{main_col_name}</th>
+    #         <td>{main_col_value}</td>
+    #     </tr>
+    # """.format(
+    #     zip_code=feature["properties"]["ZCTA5CE10"],
+    #     main_col_name=col_name,
+    #     main_col_value=feature["properties"][col_name],
+    # )
+
+    # Add rows for any additional columns
+    # for col in other_cols:
+    #     col_value = feature["properties"].get(
+    #         col, "N/A"
+    #     )  # Use 'N/A' if value is missing
+    #     balloon_html += """
+    #     <tr>
+    #         <td><b>{col_name}</b></td>
+    #         <td>{col_value}</td>
+    #     </tr>
+    #     """.format(
+    #         col_name=col, col_value=col_value
+    #     )
+
+    # # Close the HTML table
+    # balloon_html += "</table>"
+    balloon_text = f"{col_name}: {feature['properties'][col_name]}\n"
+
+    balloon_text += "\n".join(
+        [f"{col_name}: {feature['properties'][col_name]}" for col_name in other_cols]
+    )
+    poly.description = balloon_text
+
+    # Assign the balloon text to the BalloonStyle
+    # poly.style.balloonstyle.text = balloon_html
+    # Convert coordinates to the correct format
+    kml_coordinates = convert_coordinates_to_kml(polygon)
+    poly.outerboundaryis = kml_coordinates
+    value = feature["properties"][col_name]
+    poly.style.polystyle.color = simplekml.Color.changealphaint(
+        175, color_scale(value, max_value, min_value, kml=True)
+    )
+    poly.style.polystyle.outline = 3
+    # You can set altitude mode here if needed, for example:
+    # poly.altitudemode = simplekml.AltitudeMode.clamptoground
+
+
+# Modify color_scale to support KML color generation
+def color_scale(value, max_value, min_value, kml=False):
+    diff = max_value - min_value
+    if value is None:
+        color = "#ffffff00"
+    elif value == 0:
+        color = "#ffffff00"
+    elif value < (diff * 0.1) + min_value:
+        color = "#ffffb2"
+    elif value < (diff * 0.25) + min_value:
+        color = "#feda76"
+    elif value < (diff * 0.4) + min_value:
+        color = "#f5b156"
+    elif value < (diff * 0.55) + min_value:
+        color = "#f59356"
+    elif value < (diff * 0.7) + min_value:
+        color = "#f07f64"
+    elif value < (diff * 0.8) + min_value:
+        color = "#ec5b45"
+    elif value < (diff * 0.9) + min_value:
+        color = "#e73727"
+    else:
+        color = "#d7191c"
+
+    # Convert hex color to KML format if kml parameter is true
+    if kml:
+        return html_color_to_kml_color(color)
+    return color
+
+
+def html_color_to_kml_color(html_color, alpha="22"):
+    # Assume html_color is of the form "#rrggbb".
+    # strip the leading '#' and add alpha opacity value which is at the beginning in KML color codes
+    kml_color = alpha + html_color[5:7] + html_color[3:5] + html_color[1:3]
+    return kml_color
+
+
+def convert_coordinates_to_kml(polygon):
+    # GeoJSON coordinates are in [longitude, latitude] order, may include altitude
+    # KML expects a list of tuples in (longitude, latitude[, altitude]) order
+    # Assuming polygon is a list of lists where each inner list represents a point
+    # In GeoJSON, polygons are an array of LinearRings (first is outer, rest are holes)
+    # For simplicity, this function only converts the outer boundary
+
+    outer_boundary = polygon[0]  # Get the outer boundary (ignore holes)
+    return [
+        (lon, lat) for lon, lat in outer_boundary
+    ]  # KML has only lon, lat for LinearRing
+
+
+def get_column_names_from_indices(df, sec_col_input):
+    # Split the input string into a list of indices
+    indices = [int(x.strip()) for x in sec_col_input.split(",")]
+
+    # Convert indices to column names, assuming 1-based indices from user input
+    column_names = [df.columns[index] for index in indices]
+
+    return column_names
 
 
 @app.route("/heatmap/zipcode", methods=["POST"])
@@ -773,9 +923,31 @@ def generate_heatmap():
         m.add_child(NIL)
         m.keep_in_front(NIL)
 
+        # Get column names from sec_col input before generating the KML
+        sec_col_input = request.form.get("sec_col", "")
+        if sec_col_input:  # Only if sec_col_input is provided
+            kml_cols = get_column_names_from_indices(input_df, sec_col_input)
+        else:
+            kml_cols = []
+
+        # Then, pass other_cols along with the data to the KML generation function
+        kml_file_path = generate_kml(
+            merged_geo_json,
+            col_names[main_col],
+            kml_cols,
+            max_value,
+            min_value,
+            file_prefix,
+        )
+
+        kml_filename = os.path.basename(
+            kml_file_path
+        )  # Get the file name from the path
+
         # Save the generated heatmap
         unique_filename = f"{uuid.uuid4().hex}.html"
         save_path = os.path.join(HEATMAP_DIR, file_prefix + "_" + unique_filename)
+
         m.save(save_path)
 
         # Delete the user input spreadsheet
@@ -786,10 +958,52 @@ def generate_heatmap():
             {
                 "status": "success",
                 "heatmap_url": f"{os.getenv('base_url_flask')}/heatmap/result/{file_prefix}_{unique_filename}",
+                "kml_url": f"{os.getenv('base_url_flask')}/heatmap/result/{kml_filename}",
             }
         )
     else:
         return jsonify({"error": "Invalid file type"}), 400
+
+
+@app.route("/joke/beau", methods=["POST"])
+def makeJoke():
+    theme = request.json.get("theme")
+    responses = request.json.get("responses")
+    if not theme:
+        theme = "anything"
+    if not responses:
+        responses = {
+            "role": "system",
+            "content": "There are no previous messages in the chat log, do not worry about creating duplicate jokes.",
+        }
+    response = ai_client.chat.completions.create(
+        model="gpt-4-1106-preview",
+        temperature=1,
+        messages=[
+            {
+                "role": "system",
+                "content": """You are the President of the company LaneTerralever, 
+                    or more commonly known as just 'LT'. You are about 60 years old 
+                    and have 40 years of experience in marketing and business. You are 
+                    also known for being funny but in a dad-joke way with lots of puns 
+                    and plays on words. When you tell a joke, the usual response is 
+                    'Wow' followed by a couple chuckles. People refer to you as Beau 
+                    Lane but sometimes spell it wrong like 'Bo'. Users will come to you 
+                    to give them a joke and it is your job to create a concise and funny 
+                    dad joke. The maximum length of the joke should be 30 words, but 
+                    on average, the jokes should be around 10-20 words. Do not use a joke 
+                    that has already been used in the current chat logs. There is no need 
+                    to state that you understand the request and you should only respond 
+                    with the joke and nothing else.""",
+            },
+            responses,
+            {"role": "user", "content": f"Please give me a dad joke about: {theme}"},
+        ],
+    )
+    moderation = ai_client.moderations.create(input=str(response.choices[0].message))
+    if moderation.results[0].flagged:
+        return jsonify({"error": "joke was deemed inappropriate"}), 304
+    return str(response.choices[0].message.content)
 
 
 if __name__ == "__main__":

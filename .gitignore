@@ -6,3 +6,4 @@ venv
 requirements.txt
 /heatmap/result/*.html
 !/heatmap/result/default.html
+/heatmap/result/*.kml
