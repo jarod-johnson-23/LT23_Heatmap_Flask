@@ -1,7 +1,32 @@
 import os
 import io
+import re
+import csv
 import uuid
+import json
+import boto3
 import base64
+import folium
+import shutil
+import simplekml
+import subprocess
+import pandas as pd
+import geopandas as gpd
+
+from openai import OpenAI
+from bson import ObjectId
+from flask_cors import CORS
+from folium import Choropleth
+from dotenv import load_dotenv
+from datetime import timedelta
+from pymongo import MongoClient
+from flask_bcrypt import Bcrypt
+from urllib.parse import urlparse
+from openpyxl.styles import NamedStyle
+from werkzeug.utils import secure_filename
+from pymongo.errors import DuplicateKeyError
+from botocore.exceptions import ClientError
+from itsdangerous import SignatureExpired, BadSignature, URLSafeTimedSerializer
 from flask import (
     Flask,
     request,
@@ -11,31 +36,13 @@ from flask import (
     make_response,
     Blueprint,
 )
-from openai import OpenAI
-import pandas as pd
-import geopandas as gpd
-import folium
-from folium import Choropleth
-import simplekml
-import json
-from flask_bcrypt import Bcrypt
-from werkzeug.utils import secure_filename
-from openpyxl.styles import NamedStyle
-from pymongo import MongoClient
-from bson import ObjectId
-from pymongo.errors import DuplicateKeyError
-import boto3
-from botocore.exceptions import ClientError
 from flask_jwt_extended import (
     JWTManager,
     create_access_token,
     jwt_required,
     get_jwt_identity,
 )
-from itsdangerous import SignatureExpired, BadSignature, URLSafeTimedSerializer
-from dotenv import load_dotenv
-from datetime import timedelta
-from flask_cors import CORS
+
 
 ai_client = OpenAI(
     organization=os.getenv("openai_organization"), api_key=os.getenv("openai_api_key")
@@ -56,6 +63,8 @@ client = MongoClient(mongo_uri)
 db = client["LT-db-dashboard"]
 user_collection = db["userInfo"]
 user_collection.create_index("email", unique=True)
+subdomain_collection = db["subdomains"]
+subdomain_collection.create_index("subdomain", unique=True)
 
 app.config["TOKEN_KEY"] = os.getenv("TOKEN_KEY")
 
@@ -1004,6 +1013,45 @@ def makeJoke():
     if moderation.results[0].flagged:
         return jsonify({"error": "joke was deemed inappropriate"}), 304
     return str(response.choices[0].message.content)
+
+
+@app.route("/add_subdomain", methods=["POST"])
+@jwt_required()
+def add_subdomain():
+    # Get subdomain information from the request
+    subdomain_name = request.json.get("subdomain_name")
+    domain_name = request.json.get("domain_name")
+    redirect_link = request.json.get("redirect_link")
+    requester_email = request.json.get("email")
+
+    domain = ""
+    if domain_name:
+        domain = "lt.agency"
+    else:
+        domain = "laneterraleverapi.org"
+
+    if not all([subdomain_name, domain, redirect_link, requester_email]):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    # Construct the document to insert
+    document = {
+        "subdomain": subdomain_name,
+        "domain": domain,
+        "redirect_url": redirect_link,
+        "email": requester_email,
+        "is_active": False,  # Initially set to False
+        "ssl_active": False,
+    }
+
+    try:
+        subdomain_collection.insert_one(document)
+        return jsonify({"message": "Subdomain added successfully"}), 201
+
+    except DuplicateKeyError:
+        return jsonify({"error": "Subdomain already in use"}), 409
+    except Exception as e:
+        # Handle any other exceptions
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
