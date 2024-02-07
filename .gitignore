@@ -1,9 +1,9 @@
 
-State-zip-code-GeoJSON/
+# State-zip-code-GeoJSON/
 __pycache__
 .env
 venv
 requirements.txt
-/heatmap/result/*.html
-!/heatmap/result/default.html
-/heatmap/result/*.kml
+# /heatmap/result/*.html
+# !/heatmap/result/default.html
+# /heatmap/result/*.kml

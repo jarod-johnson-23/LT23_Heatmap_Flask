@@ -130,6 +130,6 @@ def create_app():
 
     @app.route("/")
     def index():
-        return {"STATUS": "OK", "CODE": 200}
+        return {"STATUS": "SUCCESS", "CODE": 200}
 
     return app
