@@ -25,6 +25,7 @@ from .dashboard.routes import routes, dashboard_bp
 from .toyota.routes import routes, toyota_bp
 from .heatmap.routes import routes, heatmap_bp
 from .subdomain.routes import routes, subdomain_bp
+from .transcription.routes import routes, transcript_bp
 
 
 def create_app():
@@ -60,6 +61,7 @@ def create_app():
     app.register_blueprint(toyota_bp, url_prefix="/toyota")
     app.register_blueprint(heatmap_bp, url_prefix="/heatmap")
     app.register_blueprint(subdomain_bp, url_prefix="/subdomain")
+    app.register_blueprint(transcript_bp, url_prefix="/transcription")
 
     # Configure Flask-PyMongo
     mongo_uri = os.getenv("mongo_uri")

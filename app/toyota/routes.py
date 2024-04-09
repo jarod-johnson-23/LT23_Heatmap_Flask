@@ -15,14 +15,24 @@ TOYOTA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toyota/fi
 
 # Toyota Media Buy Processing Project
 # Step 1: Modify Media Name and Budget Code
-def modify_media_and_budget(toyota_data, YC):
+def modify_media_and_budget(toyota_data, YC, MC):
     toyota_data["Media Name"] = toyota_data["Media Name"].replace(
-        {"Cable": "Broadcast", "TV": "Broadcast", "Radio": "Radio/Online Radio"}
+        {"Cable": "Broadcast", "TV": "Broadcast", "Radio": "Radio/On-line Radio"}
     )
 
     toyota_data["Budget Code"] = toyota_data["Budget Code"].replace(
         {"Event": f"TDA{YC}", "TCUV": f"TCUV{YC}", "Parts and Service": f"PS{YC}"}
     )
+
+    # Convert dates to datetime for calculation, without altering original dataframe
+    activity_start_date = pd.to_datetime(toyota_data["Activity Start Date"], format='%m-%d-%Y')
+    activity_end_date = pd.to_datetime(toyota_data["Activity End Date"], format='%m-%d-%Y')
+    
+    # Calculate the difference in months as a temporary variable
+    date_difference = (activity_end_date.dt.to_period('M') - activity_start_date.dt.to_period('M')).apply(lambda x: x.n)
+    
+    # Update "Vehicle Series Name" to "Brand" if difference is more than 11 months
+    toyota_data.loc[date_difference >= 11, "Vehicle Series Name"] = "Brand"
 
     return toyota_data
 
@@ -30,14 +40,15 @@ def modify_media_and_budget(toyota_data, YC):
 # Toyota Media Buy Processing Project
 # Step 2: Update the Campaign Column
 def update_campaign(toyota_data, YC, MC):
-    toyota_data["Campaign"] = "RYO" + YC + MC  # Default value
+    toyota_data["Campaign"] = "RTB" + YC  # Default value
     toyota_data.loc[toyota_data["Budget Code"] == f"PS{YC}", "Campaign"] = f"PS{YC}{MC}"
     toyota_data.loc[
         toyota_data["Budget Code"] == f"TCUV{YC}", "Campaign"
-    ] = f"TCUV{YC}{MC}"
+    ] = f"TCUV{MC}"
     toyota_data["Campaign"] = toyota_data["Campaign"].str.replace(
         " ", ""
     )  # Removing any spaces
+
     return toyota_data
 
 
@@ -77,6 +88,7 @@ def modify_dates_and_amounts(toyota_data, coop_data, nielsen_data, YC, MC):
                 (coop_data["Budget Code"] == row["Budget Code"])
                 & (coop_data["Media Name"] == row["Media Name"])
             ]
+
             if not coop_matching_row.empty:
                 coop_matching_row = coop_matching_row.iloc[0]
                 for category, percentage in coop_matching_row.items():
@@ -103,7 +115,6 @@ def modify_dates_and_amounts(toyota_data, coop_data, nielsen_data, YC, MC):
 
     new_rows_df = pd.DataFrame(new_rows)
     toyota_data = pd.concat([toyota_data, new_rows_df], ignore_index=True)
-
     return toyota_data
 
 
@@ -141,7 +152,8 @@ def load_data():
 def toyota_media_buy_processing():
     try:
         YC = request.form.get("YC")
-        MC = request.form.get("MC")
+        temp_mc = request.form.get("MC")
+        MC = f"{int(temp_mc):02d}"
 
         toyota_file = request.files.get("toyota_file")
         coop_file = request.files.get("coop_file")
@@ -162,7 +174,9 @@ def toyota_media_buy_processing():
                 columns=["Total"], errors="ignore"
             )
 
-            toyota_data = modify_media_and_budget(toyota_data, YC)
+
+
+            toyota_data = modify_media_and_budget(toyota_data, YC, MC)
             toyota_data = update_campaign(toyota_data, YC, MC)
             toyota_data = update_diversity(toyota_data)
             toyota_data = modify_dates_and_amounts(
@@ -189,7 +203,7 @@ def toyota_media_buy_processing():
             return jsonify({"error": "File Error(s)"}), 412
     except Exception as e:
         # Log the exception for debugging
-        app.logger.error(f"An error occurred: {str(e)}")
+        print("ERROR: " + e)
 
         # Return a JSON response indicating an error
         return jsonify({"error": "An error occurred", "message": str(e)}), 500
