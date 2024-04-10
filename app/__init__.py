@@ -33,11 +33,6 @@ def create_app():
     app = Flask(__name__)
 
     load_dotenv()
-    CORS(
-        app,
-        resources={r"/*": {"origins": os.getenv("base_url_react")}},
-        supports_credentials=True,
-    )
 
     # LT Web Tool Dashboard Project
     def generate_jwt_secret_key(length=64):
@@ -63,6 +58,12 @@ def create_app():
     app.register_blueprint(subdomain_bp, url_prefix="/subdomain")
     app.register_blueprint(transcript_bp, url_prefix="/transcription")
 
+    CORS(
+        app,
+        resources={r"/*": {"origins": os.getenv("base_url_react")}},
+        supports_credentials=True,
+    )
+
     # Configure Flask-PyMongo
     mongo_uri = os.getenv("mongo_uri")
     client = MongoClient(mongo_uri)
@@ -73,12 +74,6 @@ def create_app():
     app.subdomain_collection.create_index("subdomain", unique=True)
     app.timestamps_collection = app.db["timestamps"]
     app.timestamps_collection.create_index("timestamp", unique=True)
-
-    # Random CJ Request Project
-    @app.route("/ai_prompt_download")
-    def download_file():
-        file_path = "./ai_prompt_download/AI_Prompt_Files.zip"
-        return send_file(file_path, as_attachment=True)
 
     # Beau Joke Project
     @app.route("/joke/beau", methods=["POST"])
