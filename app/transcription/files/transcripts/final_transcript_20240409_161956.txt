@@ -1,0 +1,34 @@
+[Shirley] (0.0s - 7.2s):
+ Good afternoon. This is Shirley.
+
+[Chris] (8.0s - 9.2s):
+ Hey, Shirley. This is Chris.
+
+[Shirley] (9.8s - 10.5s):
+ Hi, Chris.
+
+[Chris] (11.2s - 13.3s):
+ Okay, we've got to figure it out. Now we can chat.
+
+[Shirley] (14.1s - 14.5s):
+ Okay.
+
+[Chris] (17.1s - 18.5s):
+ Were you having trouble finding your microphone?
+
+[Shirley] (19.8s - 29.2s):
+ Yeah, well, I see my microphone here, but I had trouble with this one other time.
+ I had to go on my other computer to get the microphone to work, so I'm not sure what it is.
+
+[Chris] (30.0s - 38.8s):
+ This is fine. We just love to have a transcript so that when we go through it, we can kind of consider everything that we're hearing from everybody.
+ So I appreciate your flexibility.
+
+[Shirley] (39.7s - 41.0s):
+ Okay, thank you.
+
+[Chris] (41.8s - 69.9s):
+ Okay. Well, before we start, I know David explained to you what we're doing.
+ And all we're trying to do, Charlie and I, is we're just trying to understand how the business works, because we know a lot of things about technology and AI.
+ And our goal is, how do we use AI to do things that people don't necessarily like doing or are tedious and free you up to do?
+
