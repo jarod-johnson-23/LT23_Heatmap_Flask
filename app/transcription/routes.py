@@ -13,57 +13,57 @@ from . import routes
 TRANSCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "files")
 
 # Load the Whisper model
-model = whisper.load_model("large")  # Choose between "tiny", "base", "small", "medium", "large" based on your needs and resources
+# model = whisper.load_model("large")  # Choose between "tiny", "base", "small", "medium", "large" based on your needs and resources
 
-def speaker_diarization(file_path):
-  # Replace YOUR_DEEPGRAM_API_KEY with your actual API key
-  api_key = os.getenv('deepgram_api_key')
+# def speaker_diarization(file_path):
+#   # Replace YOUR_DEEPGRAM_API_KEY with your actual API key
+#   api_key = os.getenv('deepgram_api_key')
 
-  # Construct the API endpoint
-  url = 'https://api.deepgram.com/v1/listen'
-  params = {
-      'diarize': 'true',
-      'punctuate': 'true',
-      'utterances': 'true'
-  }
-  headers = {
-      'Authorization': f'Token {api_key}',
-      'Content-Type': 'audio/mp3'
-  }
+#   # Construct the API endpoint
+#   url = 'https://api.deepgram.com/v1/listen'
+#   params = {
+#       'diarize': 'true',
+#       'punctuate': 'true',
+#       'utterances': 'true'
+#   }
+#   headers = {
+#       'Authorization': f'Token {api_key}',
+#       'Content-Type': 'audio/mp3'
+#   }
 
-  # Open the file in binary read mode
-  with open(file_path, 'rb') as file:
-      # Make the API request
-      response = requests.post(url, headers=headers, params=params, data=file)
+#   # Open the file in binary read mode
+#   with open(file_path, 'rb') as file:
+#       # Make the API request
+#       response = requests.post(url, headers=headers, params=params, data=file)
       
-  # Check for successful response
-  if response.status_code == 200:
-      # Parse the JSON response
-      response_json = response.json()
-      # Extract utterances
-      utterances = response_json.get('results', {}).get('utterances', [])
+#   # Check for successful response
+#   if response.status_code == 200:
+#       # Parse the JSON response
+#       response_json = response.json()
+#       # Extract utterances
+#       utterances = response_json.get('results', {}).get('utterances', [])
       
-      # List to hold speaker IDs and timestamps
-      speaker_details = []
+#       # List to hold speaker IDs and timestamps
+#       speaker_details = []
       
-      # Collect speaker ID and timestamps
-      for utterance in utterances:
-          speaker_id = utterance.get('speaker')
-          timestamp = utterance.get('start')
-          end_timestamp = utterance.get('end')
+#       # Collect speaker ID and timestamps
+#       for utterance in utterances:
+#           speaker_id = utterance.get('speaker')
+#           timestamp = utterance.get('start')
+#           end_timestamp = utterance.get('end')
           
-          speaker_detail = {
-              'speaker_id': speaker_id,
-              'start_timestamp': timestamp,
-              'end_timestamp': end_timestamp
-          }
+#           speaker_detail = {
+#               'speaker_id': speaker_id,
+#               'start_timestamp': timestamp,
+#               'end_timestamp': end_timestamp
+#           }
           
-          speaker_details.append(speaker_detail)
+#           speaker_details.append(speaker_detail)
       
-      # Now speaker_details contains the requested information
-      return speaker_details
-  else:
-      print(f"Error: API request failed with status code {response.status_code}")
+#       # Now speaker_details contains the requested information
+#       return speaker_details
+#   else:
+#       print(f"Error: API request failed with status code {response.status_code}")
 
 # This funcitonality is now performed by a different server to separate the heavy computation.
 # def perform_asr(file_path):
@@ -89,110 +89,110 @@ def speaker_diarization(file_path):
 
 #     return transcription_details
 
-def combine_speaker_and_transcription(speaker_results, transcription_details):
-    combined_transcript = []
-    speaker_lines = {}  # To hold the lines spoken by each speaker
+# def combine_speaker_and_transcription(speaker_results, transcription_details):
+#     combined_transcript = []
+#     speaker_lines = {}  # To hold the lines spoken by each speaker
     
-    def calculate_overlap(speaker, trans_start, trans_end):
-        overlap_start = max(speaker['start_timestamp'], trans_start)
-        overlap_end = min(speaker['end_timestamp'], trans_end)
+#     def calculate_overlap(speaker, trans_start, trans_end):
+#         overlap_start = max(speaker['start_timestamp'], trans_start)
+#         overlap_end = min(speaker['end_timestamp'], trans_end)
         
-        overlap_duration = max(0, overlap_end - overlap_start)
-        trans_duration = trans_end - trans_start 
+#         overlap_duration = max(0, overlap_end - overlap_start)
+#         trans_duration = trans_end - trans_start 
         
-        # Ensure the trans_duration is at least 0.1 seconds to prevent division by zero
-        trans_duration = max(trans_duration, 0.1)
+#         # Ensure the trans_duration is at least 0.1 seconds to prevent division by zero
+#         trans_duration = max(trans_duration, 0.1)
         
-        return overlap_duration / trans_duration  # This is the overlap percentage
+#         return overlap_duration / trans_duration  # This is the overlap percentage
 
-    # For each transcript segment, determine the corresponding speaker
-    for transcription in transcription_details:
-        trans_start = round(transcription['start_time'], 1)
-        trans_end = round(transcription['end_time'], 1)
+#     # For each transcript segment, determine the corresponding speaker
+#     for transcription in transcription_details:
+#         trans_start = round(transcription['start_time'], 1)
+#         trans_end = round(transcription['end_time'], 1)
 
-        # Generate list of (speaker, overlap_percentage) tuples
-        overlap_list = [
-            (speaker['speaker_id'], calculate_overlap(speaker, trans_start, trans_end)) 
-            for speaker in speaker_results
-        ]
+#         # Generate list of (speaker, overlap_percentage) tuples
+#         overlap_list = [
+#             (speaker['speaker_id'], calculate_overlap(speaker, trans_start, trans_end)) 
+#             for speaker in speaker_results
+#         ]
 
-        # Sort by overlap percentage in descending order
-        overlap_list.sort(key=lambda x: -x[1])
+#         # Sort by overlap percentage in descending order
+#         overlap_list.sort(key=lambda x: -x[1])
         
-        # Determine the speakers for this segment
-        chosen_speakers = set()  # Use a set for unique speaker IDs
-        for speaker_id, overlap_percentage in overlap_list:
-            if overlap_percentage >= 0.8:
-                chosen_speakers.add(speaker_id)
-                break
-            elif overlap_percentage > 0:
-                chosen_speakers.add(speaker_id)
+#         # Determine the speakers for this segment
+#         chosen_speakers = set()  # Use a set for unique speaker IDs
+#         for speaker_id, overlap_percentage in overlap_list:
+#             if overlap_percentage >= 0.8:
+#                 chosen_speakers.add(speaker_id)
+#                 break
+#             elif overlap_percentage > 0:
+#                 chosen_speakers.add(speaker_id)
 
-        # Create the output structure if speakers have been identified
-        if chosen_speakers:
-            combined_segment = {
-                'speaker_ids': list(chosen_speakers), 
-                'start_time': trans_start,
-                'end_time': trans_end, 
-                'text': transcription['text']
-            }
-            combined_transcript.append(combined_segment)
+#         # Create the output structure if speakers have been identified
+#         if chosen_speakers:
+#             combined_segment = {
+#                 'speaker_ids': list(chosen_speakers), 
+#                 'start_time': trans_start,
+#                 'end_time': trans_end, 
+#                 'text': transcription['text']
+#             }
+#             combined_transcript.append(combined_segment)
             
-            # Record the lines for speaker summaries
-            for speaker_id in chosen_speakers:
-                if speaker_id not in speaker_lines:
-                    speaker_lines[speaker_id] = []
-                speaker_lines[speaker_id].append(transcription['text'])  # Add text to speaker
-        else:
-            print(f"No speaker found for the segment {trans_start}s - {trans_end}s.")
+#             # Record the lines for speaker summaries
+#             for speaker_id in chosen_speakers:
+#                 if speaker_id not in speaker_lines:
+#                     speaker_lines[speaker_id] = []
+#                 speaker_lines[speaker_id].append(transcription['text'])  # Add text to speaker
+#         else:
+#             print(f"No speaker found for the segment {trans_start}s - {trans_end}s.")
     
-    # Generate speaker summaries with the first few lines
-    speaker_summaries = {f"Speaker {speaker_id}": " ".join(lines[:3]) for speaker_id, lines in speaker_lines.items()}
+#     # Generate speaker summaries with the first few lines
+#     speaker_summaries = {f"Speaker {speaker_id}": " ".join(lines[:3]) for speaker_id, lines in speaker_lines.items()}
 
-    return combined_transcript, speaker_summaries
+#     return combined_transcript, speaker_summaries
 
-def display_transcript(transcript_data):
-    # Generate a filename with the current timestamp
-    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"final_transcript_{timestamp_str}.txt"
+# def display_transcript(transcript_data):
+#     # Generate a filename with the current timestamp
+#     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+#     filename = f"final_transcript_{timestamp_str}.txt"
     
-    with open(f'{current_app.root_path}/transcription/files/transcripts/{filename}', 'w') as file:
-        # Initialize previous speaker and start time for combining segments
-        previous_speaker_ids = None
-        segment_start_time = None
-        segment_texts = []
+#     with open(f'{current_app.root_path}/transcription/files/transcripts/{filename}', 'w') as file:
+#         # Initialize previous speaker and start time for combining segments
+#         previous_speaker_ids = None
+#         segment_start_time = None
+#         segment_texts = []
 
-        # Helper function to write segments to the file
-        def write_segment(speaker_ids, start_time, end_time, texts):
-            speaker_label = " & ".join(f"Speaker {speaker_id}" for speaker_id in speaker_ids)
-            # Write combined speaker/timestamp line
-            file.write(f"[{speaker_label}] ({start_time}s - {end_time}s):\n")
-            # Write each text segment separated by newlines
-            for text in texts:
-                file.write(text + "\n")
-            file.write("\n")
+#         # Helper function to write segments to the file
+#         def write_segment(speaker_ids, start_time, end_time, texts):
+#             speaker_label = " & ".join(f"Speaker {speaker_id}" for speaker_id in speaker_ids)
+#             # Write combined speaker/timestamp line
+#             file.write(f"[{speaker_label}] ({start_time}s - {end_time}s):\n")
+#             # Write each text segment separated by newlines
+#             for text in texts:
+#                 file.write(text + "\n")
+#             file.write("\n")
 
-        for segment in transcript_data:
-            # If the segment has the same speaker(s), combine the texts
-            if segment['speaker_ids'] == previous_speaker_ids:
-                segment_texts.append(segment['text'])
-                end_time = segment['end_time']  # Update the end time to the current segment's end time
-            else:
-                # If we have a previous speaker, write the combined segment
-                if previous_speaker_ids is not None:
-                    write_segment(previous_speaker_ids, segment_start_time, end_time, segment_texts)
+#         for segment in transcript_data:
+#             # If the segment has the same speaker(s), combine the texts
+#             if segment['speaker_ids'] == previous_speaker_ids:
+#                 segment_texts.append(segment['text'])
+#                 end_time = segment['end_time']  # Update the end time to the current segment's end time
+#             else:
+#                 # If we have a previous speaker, write the combined segment
+#                 if previous_speaker_ids is not None:
+#                     write_segment(previous_speaker_ids, segment_start_time, end_time, segment_texts)
                 
-                # Reset for the new speaker segment
-                previous_speaker_ids = segment['speaker_ids']
-                segment_start_time = segment['start_time']
-                end_time = segment['end_time']
-                segment_texts = [segment['text']]
+#                 # Reset for the new speaker segment
+#                 previous_speaker_ids = segment['speaker_ids']
+#                 segment_start_time = segment['start_time']
+#                 end_time = segment['end_time']
+#                 segment_texts = [segment['text']]
 
-        # Make sure to write the last segment
-        if previous_speaker_ids is not None:
-            write_segment(previous_speaker_ids, segment_start_time, end_time, segment_texts)
+#         # Make sure to write the last segment
+#         if previous_speaker_ids is not None:
+#             write_segment(previous_speaker_ids, segment_start_time, end_time, segment_texts)
 
-    return filename
+#     return filename
 
 def send_audio_file(file_path):
     # Open the audio file in binary mode
