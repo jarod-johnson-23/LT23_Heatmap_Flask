@@ -65,28 +65,29 @@ def speaker_diarization(file_path):
   else:
       print(f"Error: API request failed with status code {response.status_code}")
 
-def perform_asr(file_path):
-    # Transcribe the audio file with timestamps
-    audio_file_path = file_path  # Replace with the path to your actual file
-    result_segments = model.transcribe(audio_file_path)
+# This funcitonality is now performed by a different server to separate the heavy computation.
+# def perform_asr(file_path):
+#     # Transcribe the audio file with timestamps
+#     audio_file_path = file_path  # Replace with the path to your actual file
+#     result_segments = model.transcribe(audio_file_path)
 
-    # Initialize a list to hold transcription details
-    transcription_details = []
+#     # Initialize a list to hold transcription details
+#     transcription_details = []
 
-    # The result contains a 'segments' key with the transcription and timestamps for each segment
-    for segment in result_segments["segments"]:
-        start_time = segment['start']
-        end_time = segment['end']
-        text = segment['text']
+#     # The result contains a 'segments' key with the transcription and timestamps for each segment
+#     for segment in result_segments["segments"]:
+#         start_time = segment['start']
+#         end_time = segment['end']
+#         text = segment['text']
 
-        # Append transcription details to the list
-        transcription_details.append({
-            'start_time': start_time,
-            'end_time': end_time,
-            'text': text
-        })
+#         # Append transcription details to the list
+#         transcription_details.append({
+#             'start_time': start_time,
+#             'end_time': end_time,
+#             'text': text
+#         })
 
-    return transcription_details
+#     return transcription_details
 
 def combine_speaker_and_transcription(speaker_results, transcription_details):
     combined_transcript = []
@@ -193,6 +194,15 @@ def display_transcript(transcript_data):
 
     return filename
 
+def send_audio_file(file_path):
+    # Open the audio file in binary mode
+    with open(file_path, 'rb') as file:
+        files = {'audio_file': file}
+        # Make the POST request to the server endpoint
+        url = os.getenv("ml_model_api_url")
+        response = requests.post(f"{url}/whisper_asr", files=files)
+        return response
+
 def allowed_file(filename):
   ALLOWED_EXTENSIONS = {'mp3', 'wav'}
   
@@ -218,17 +228,20 @@ def init_transcription():
         
   # Save file to the server
   audio_file.save(audio_file_path)
-  speaker_results = speaker_diarization(audio_file_path)
-  transcription_details = perform_asr(audio_file_path)
-  full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
-  transcript_file = display_transcript(full_transcript)
+  # speaker_results = speaker_diarization(audio_file_path)
+  # transcription_details = perform_asr(audio_file_path)
+  # full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
+  # transcript_file = display_transcript(full_transcript)
 
-  response = {
-    "filename": transcript_file,
-    "speakers": speaker_summaries
-  }
 
-  return jsonify(response), 200
+  # response = {
+  #   "filename": transcript_file,
+  #   "speakers": speaker_summaries
+  # }
+
+  response = send_audio_file(audio_file_path)
+
+  return jsonify({"message": "Started processing"}), 200
 
 @transcript_bp.route("/add_speakers_and_send", methods=["POST"])
 def finalize_transcript():
@@ -259,3 +272,19 @@ def finalize_transcript():
   
     # Return the updated file
     return send_from_directory(directory=directory, path=filename, as_attachment=True)
+
+@transcript_bp.route('/upload', methods=['POST'])
+def upload_file():
+    # Check if the post request has the file part
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    # Save the file
+    if file:
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(TRANSCRIPT_DIR, "transcripts", filename)
+        file.save(save_path)
+        return jsonify({'message': 'File uploaded successfully', 'path': save_path}), 200
