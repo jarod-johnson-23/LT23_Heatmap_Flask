@@ -1,0 +1,32 @@
+[person1] (0.0s - 8.0s):
+ Good afternoon, this is Shirley.
+
+[person2] (8.0s - 10.0s):
+ Hi, Shirley. This is Chris.
+
+[person1] (10.0s - 11.0s):
+ Hi Chris.
+
+[person2] (11.0s - 14.0s):
+ Okay, we got to figure it out. Now we can chat.
+
+[person1 & person2] (14.0s - 17.0s):
+ Okay.
+
+[person2] (17.0s - 19.0s):
+ We haven't trouble finding a microphone.
+
+[person1] (19.0s - 30.0s):
+ Yeah, well, I see my microphone here, but I had trouble with this one other time is that I had to go on my other computer to get to get the microphone to work.
+ So I'm not sure what it is.
+
+[person2] (30.0s - 39.0s):
+ This is fine. I just we we just love to have a transcript so that when we go through it, we can kind of consider everything that we're hearing from everybody. So I appreciate your flexibility.
+
+[person1] (39.0s - 42.0s):
+ Okay. Thank you.
+
+[person2] (42.0s - 70.0s):
+ Well, before we start, I'm, I know David explained to you what we're doing.
+ And all we're trying to do, Charlie and I is, we're just trying to understand how the business works.
+ Because we know a lot of things about technology and AI and our goal is, how do we, how do we use AI to do things that people don't necessarily like doing or tedious and free you up to.

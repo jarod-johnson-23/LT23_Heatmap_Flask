@@ -3,7 +3,9 @@ from werkzeug.utils import secure_filename
 import os
 import requests
 import whisper
+import re
 from datetime import datetime
+from collections import defaultdict
 
 transcript_bp = Blueprint("transcript_bp", __name__)
 
@@ -243,13 +245,88 @@ def init_transcription():
 
   return jsonify({"message": "Started processing"}), 200
 
+@transcript_bp.route("/grab_file", methods=["POST"])
+def grab_file():
+    # Check if it's JSON body
+    if not request.json or 'grab_file_name' not in request.json:
+        return jsonify({'error': 'No file name provided'}), 400
+
+    grab_file_name = request.json['grab_file_name']
+
+    # URL of the external API that returns a txt file
+    api_url = os.getenv("ml_model_api_url")
+    if not api_url:
+        return jsonify({'error': 'API URL is not configured'}), 500
+
+    params = {'file_name': grab_file_name}
+
+    # Make the API request
+    response = requests.get(f"{api_url}/get-file", params=params, stream=True)
+
+    # Check if the request was successful
+    if response.status_code == 200:
+        file_path = os.path.join(TRANSCRIPT_DIR, 'temp_transcripts', grab_file_name)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        # Save the txt file
+        with open(file_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192): 
+                file.write(chunk)
+
+        speakers_response = process_transcript_file(file_path)
+
+        return jsonify({'message': 'File downloaded and processed successfully',
+                'dialogue_by_speaker': speakers_response}), 200
+    else:
+        return jsonify({'error': 'Failed to fetch file from API', 'status_code': response.status_code}), response.status_code
+
+def process_transcript_file(file_path):
+    # Create a dictionary to store the dialogues
+    speaker_dialogues = defaultdict(str)
+    
+    # Open the transcript file
+    with open(file_path, 'r') as file:
+        content = file.read()
+    
+    # Regular expression to match speaker patterns and capture multiline dialogue
+    pattern = re.compile(r'\[Speaker (\d+)(?: & Speaker \d+)?\] \(\d+\.\d+s - \d+\.\d+s\):\n(.*?)(?=\n\[|\n{2,}|\Z)', re.DOTALL)
+    
+    matches = pattern.findall(content)
+    
+    for match in matches:
+        # Handling multiple speakers
+        if '&' in match[0]:
+            continue
+        
+        # "Speaker {num}" format for keys
+        speaker_id = f"Speaker {match[0]}"
+        dialogue = match[1]
+        clean_dialogue = ' '.join(dialogue.splitlines()).strip()
+        
+        # Append the cleaned dialogue
+        speaker_dialogues[speaker_id] += clean_dialogue + ' '
+    
+    # Truncate the dialogue to 200 characters at the nearest word and add "..."
+    for speaker, text in speaker_dialogues.items():
+        if len(text) > 200:
+            truncated_text = text[:200].rsplit(' ', 1)[0] + '...'
+            speaker_dialogues[speaker] = truncated_text
+        else:
+            speaker_dialogues[speaker] = text.strip()
+    
+    # Convert defaultdict to a regular dictionary for JSON output
+    return dict(speaker_dialogues)
+
+    
+
+
 @transcript_bp.route("/add_speakers_and_send", methods=["POST"])
 def finalize_transcript():
     data = request.json
     filename = data["filename"]
     speaker_names = data["speaker_names"]  # Expecting {'Speaker 0': 'Alice', 'Speaker 1': 'Bob'}
   
-    directory = os.path.join(current_app.root_path, 'transcription/files/transcripts')
+    directory = os.path.join(current_app.root_path, 'transcription/files/temp_transcripts')
     file_path = os.path.join(directory, filename)
   
     # Ensure the transcript file exists
