@@ -260,7 +260,12 @@ def init_transcription():
   #   "speakers": speaker_summaries
   # }
 
-  response = send_audio_file(audio_file_path)
+  # Check if email is part of the form data
+  if 'email' not in request.form:
+      return jsonify({"error": "Missing email"}), 400
+  email = request.form['email']
+
+  response = send_audio_file(audio_file_path, email)
 
   return jsonify({"message": "Started processing"}), 200
 
