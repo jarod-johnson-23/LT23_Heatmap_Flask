@@ -267,7 +267,7 @@ def init_transcription():
 
   response = send_audio_file(audio_file_path, email)
 
-  return jsonify({"message": "Started processing"}), 200
+  return jsonify({"message": "Started processing", "response": response}), 200
 
 @transcript_bp.route("/grab_file", methods=["POST"])
 def grab_file():
