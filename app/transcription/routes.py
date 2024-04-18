@@ -196,13 +196,32 @@ TRANSCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "files
 
 #     return filename
 
-def send_audio_file(file_path):
+def send_audio_file(file_path, email):
+    # Determine the content-type based on the file extension
+    if file_path.lower().endswith('.wav'):
+        content_type = 'audio/wav'
+    elif file_path.lower().endswith('.mp3'):
+        content_type = 'audio/mpeg'
+    else:
+        raise ValueError("Unsupported file type. Please use either .mp3 or .wav files.")
+    
+    # Get the filename from the file path
+    filename = os.path.basename(file_path)
+    
     # Open the audio file in binary mode
     with open(file_path, 'rb') as file:
-        files = {'audio_file': file}
+        # Constructing the files dictionary to send files
+        files = {'audio_file': (filename, file, content_type)}
+        
+        # Constructing the data dictionary to send additional data
+        data = {'email': email}
+        
         # Make the POST request to the server endpoint
         url = os.getenv("ml_model_api_url")
-        response = requests.post(f"{url}/whisper_asr", files=files)
+        
+        # Include both files and data in the POST request
+        response = requests.post(f"{url}/whisper_asr", files=files, data=data)
+        
         return response
 
 def allowed_file(filename):
@@ -225,7 +244,7 @@ def init_transcription():
       filename = secure_filename(audio_file.filename)
       
       # Create a unique or specific directory for audio files if doesn't exist
-      audio_file_path = os.path.join(current_app.root_path, 'uploaded_files', filename)
+      audio_file_path = os.path.join(current_app.root_path, 'transcription/files/audio', filename)
       os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
         
   # Save file to the server
@@ -316,9 +335,6 @@ def process_transcript_file(file_path):
     
     # Convert defaultdict to a regular dictionary for JSON output
     return dict(speaker_dialogues)
-
-    
-
 
 @transcript_bp.route("/add_speakers_and_send", methods=["POST"])
 def finalize_transcript():
