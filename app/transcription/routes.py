@@ -14,7 +14,10 @@ from . import routes
 
 TRANSCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "files")
 
-client = OpenAI()
+ai_client = OpenAI(
+    organization=os.getenv("openai_organization"),
+    api_key=os.getenv("openai_api_key"),
+)
 
 def speaker_diarization(file_path):
   api_key = os.getenv('deepgram_api_key')
