@@ -2,10 +2,10 @@ from flask import Blueprint, request, jsonify, send_file, current_app, send_from
 from werkzeug.utils import secure_filename
 import os
 import requests
-import whisper
 import re
 from datetime import datetime
 from collections import defaultdict
+from openai import OpenAI
 
 transcript_bp = Blueprint("transcript_bp", __name__)
 
@@ -14,215 +14,190 @@ from . import routes
 
 TRANSCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "files")
 
-# Load the Whisper model
-# model = whisper.load_model("large")  # Choose between "tiny", "base", "small", "medium", "large" based on your needs and resources
+client = OpenAI()
 
-# def speaker_diarization(file_path):
-#   # Replace YOUR_DEEPGRAM_API_KEY with your actual API key
-#   api_key = os.getenv('deepgram_api_key')
+def speaker_diarization(file_path):
+  api_key = os.getenv('deepgram_api_key')
 
-#   # Construct the API endpoint
-#   url = 'https://api.deepgram.com/v1/listen'
-#   params = {
-#       'diarize': 'true',
-#       'punctuate': 'true',
-#       'utterances': 'true'
-#   }
-#   headers = {
-#       'Authorization': f'Token {api_key}',
-#       'Content-Type': 'audio/mp3'
-#   }
+  # Construct the API endpoint
+  url = 'https://api.deepgram.com/v1/listen'
+  params = {
+      'diarize': 'true',
+      'punctuate': 'true',
+      'utterances': 'true'
+  }
+  headers = {
+      'Authorization': f'Token {api_key}',
+      'Content-Type': 'audio/mp3'
+  }
 
-#   # Open the file in binary read mode
-#   with open(file_path, 'rb') as file:
-#       # Make the API request
-#       response = requests.post(url, headers=headers, params=params, data=file)
+  # Open the file in binary read mode
+  with open(file_path, 'rb') as file:
+      # Make the API request
+      response = requests.post(url, headers=headers, params=params, data=file)
       
-#   # Check for successful response
-#   if response.status_code == 200:
-#       # Parse the JSON response
-#       response_json = response.json()
-#       # Extract utterances
-#       utterances = response_json.get('results', {}).get('utterances', [])
+  # Check for successful response
+  if response.status_code == 200:
+      # Parse the JSON response
+      response_json = response.json()
+      # Extract utterances
+      utterances = response_json.get('results', {}).get('utterances', [])
       
-#       # List to hold speaker IDs and timestamps
-#       speaker_details = []
+      # List to hold speaker IDs and timestamps
+      speaker_details = []
       
-#       # Collect speaker ID and timestamps
-#       for utterance in utterances:
-#           speaker_id = utterance.get('speaker')
-#           timestamp = utterance.get('start')
-#           end_timestamp = utterance.get('end')
+      # Collect speaker ID and timestamps
+      for utterance in utterances:
+          speaker_id = utterance.get('speaker')
+          timestamp = utterance.get('start')
+          end_timestamp = utterance.get('end')
           
-#           speaker_detail = {
-#               'speaker_id': speaker_id,
-#               'start_timestamp': timestamp,
-#               'end_timestamp': end_timestamp
-#           }
+          speaker_detail = {
+              'speaker_id': speaker_id,
+              'start_timestamp': timestamp,
+              'end_timestamp': end_timestamp
+          }
           
-#           speaker_details.append(speaker_detail)
-      
-#       # Now speaker_details contains the requested information
-#       return speaker_details
-#   else:
-#       print(f"Error: API request failed with status code {response.status_code}")
+          speaker_details.append(speaker_detail)
+      # Now speaker_details contains the requested information
+      return speaker_details
+  else:
+      print(f"Error: API request failed with status code {response.status_code}")
 
-# This funcitonality is now performed by a different server to separate the heavy computation.
-# def perform_asr(file_path):
-#     # Transcribe the audio file with timestamps
-#     audio_file_path = file_path  # Replace with the path to your actual file
-#     result_segments = model.transcribe(audio_file_path)
+def perform_asr(file_path, prompt=""):
+    audio_file = open(file_path, "rb")
+    response = client.audio.transcriptions.create(
+        file=audio_file,
+        model="whisper-1",
+        response_format="verbose_json",
+        timestamp_granularities=["segment"],
+        prompt=prompt
+    )
 
-#     # Initialize a list to hold transcription details
-#     transcription_details = []
+    speaker_segments = response.segments
 
-#     # The result contains a 'segments' key with the transcription and timestamps for each segment
-#     for segment in result_segments["segments"]:
-#         start_time = segment['start']
-#         end_time = segment['end']
-#         text = segment['text']
+    # Initialize a list to hold transcription details
+    transcription_details = []
 
-#         # Append transcription details to the list
-#         transcription_details.append({
-#             'start_time': start_time,
-#             'end_time': end_time,
-#             'text': text
-#         })
+    # The result contains a 'segments' key with the transcription and timestamps for each segment
+    for segment in speaker_segments:
+        start_time = segment['start']
+        end_time = segment['end']
+        text = segment['text']
 
-#     return transcription_details
+        # Append transcription details to the list
+        transcription_details.append({
+            'start_time': start_time,
+            'end_time': end_time,
+            'text': text
+        })
 
-# def combine_speaker_and_transcription(speaker_results, transcription_details):
-#     combined_transcript = []
-#     speaker_lines = {}  # To hold the lines spoken by each speaker
+    return transcription_details
+
+
+def combine_speaker_and_transcription(speaker_results, transcription_details):
+    combined_transcript = []
+    speaker_lines = {}  # To hold the lines spoken by each speaker
     
-#     def calculate_overlap(speaker, trans_start, trans_end):
-#         overlap_start = max(speaker['start_timestamp'], trans_start)
-#         overlap_end = min(speaker['end_timestamp'], trans_end)
-        
-#         overlap_duration = max(0, overlap_end - overlap_start)
-#         trans_duration = trans_end - trans_start 
-        
-#         # Ensure the trans_duration is at least 0.1 seconds to prevent division by zero
-#         trans_duration = max(trans_duration, 0.1)
-        
-#         return overlap_duration / trans_duration  # This is the overlap percentage
+    def calculate_overlap(speaker, trans_start, trans_end):
+        overlap_start = max(speaker['start_timestamp'], trans_start)
+        overlap_end = min(speaker['end_timestamp'], trans_end)        
+        overlap_duration = max(0, overlap_end - overlap_start)
+        return overlap_duration
 
-#     # For each transcript segment, determine the corresponding speaker
-#     for transcription in transcription_details:
-#         trans_start = round(transcription['start_time'], 1)
-#         trans_end = round(transcription['end_time'], 1)
+    for transcription in transcription_details:
+        trans_start = transcription['start_time']
+        trans_end = transcription['end_time']
 
-#         # Generate list of (speaker, overlap_percentage) tuples
-#         overlap_list = [
-#             (speaker['speaker_id'], calculate_overlap(speaker, trans_start, trans_end)) 
-#             for speaker in speaker_results
-#         ]
+        # Generate list of (speaker, overlap_time) tuples
+        overlap_list = [
+            (speaker['speaker_id'], calculate_overlap(speaker, trans_start, trans_end)) 
+            for speaker in speaker_results
+        ]
 
-#         # Sort by overlap percentage in descending order
-#         overlap_list.sort(key=lambda x: -x[1])
-        
-#         # Determine the speakers for this segment
-#         chosen_speakers = set()  # Use a set for unique speaker IDs
-#         for speaker_id, overlap_percentage in overlap_list:
-#             if overlap_percentage >= 0.8:
-#                 chosen_speakers.add(speaker_id)
-#                 break
-#             elif overlap_percentage > 0:
-#                 chosen_speakers.add(speaker_id)
+        # Find the maximum overlap time
+        max_overlap = max([time for _, time in overlap_list], default=0)
 
-#         # Create the output structure if speakers have been identified
-#         if chosen_speakers:
-#             combined_segment = {
-#                 'speaker_ids': list(chosen_speakers), 
-#                 'start_time': trans_start,
-#                 'end_time': trans_end, 
-#                 'text': transcription['text']
-#             }
-#             combined_transcript.append(combined_segment)
+        # Determine the speakers with considerable overlaps > 50% of max overlap time
+        chosen_speakers = {
+            speaker_id for speaker_id, overlap_time in overlap_list 
+            if overlap_time >= 0.5 * max_overlap and overlap_time > 0
+        }
+
+        # Create the output structure if speakers have been identified
+        if chosen_speakers:
+            combined_segment = {
+                'speaker_ids': list(chosen_speakers),
+                'start_time': trans_start,
+                'end_time': trans_end, 
+                'text': transcription['text']
+            }
+            combined_transcript.append(combined_segment)
             
-#             # Record the lines for speaker summaries
-#             for speaker_id in chosen_speakers:
-#                 if speaker_id not in speaker_lines:
-#                     speaker_lines[speaker_id] = []
-#                 speaker_lines[speaker_id].append(transcription['text'])  # Add text to speaker
-#         else:
-#             print(f"No speaker found for the segment {trans_start}s - {trans_end}s.")
+            # Record the lines for speaker summaries
+            for speaker_id in chosen_speakers:
+                if speaker_id not in speaker_lines:
+                    speaker_lines[speaker_id] = []
+                speaker_lines[speaker_id].append(transcription['text'])
+        else:
+            print(f"No speaker found for the segment {trans_start}s - {trans_end}s.")
     
-#     # Generate speaker summaries with the first few lines
-#     speaker_summaries = {f"Speaker {speaker_id}": " ".join(lines[:3]) for speaker_id, lines in speaker_lines.items()}
+    # Generate speaker summaries with the first few lines
+    speaker_summaries = {f"Speaker {speaker_id}": " ".join(lines[:3]) for speaker_id, lines in speaker_lines.items()}
 
-#     return combined_transcript, speaker_summaries
+    return combined_transcript, speaker_summaries
 
-# def display_transcript(transcript_data):
-#     # Generate a filename with the current timestamp
-#     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-#     filename = f"final_transcript_{timestamp_str}.txt"
+def display_transcript(transcript_data):
+    # Generate a filename with the current timestamp
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"final_transcript_{timestamp_str}.txt"
     
-#     with open(f'{current_app.root_path}/transcription/files/transcripts/{filename}', 'w') as file:
-#         # Initialize previous speaker and start time for combining segments
-#         previous_speaker_ids = None
-#         segment_start_time = None
-#         segment_texts = []
+    with open(f'{current_app.root_path}/transcription/files/transcripts/{filename}', 'w') as file:
+        # Initialize previous speaker and start time for combining segments
+        previous_speaker_ids = None
+        segment_start_time = None
+        segment_texts = []
 
-#         # Helper function to write segments to the file
-#         def write_segment(speaker_ids, start_time, end_time, texts):
-#             speaker_label = " & ".join(f"Speaker {speaker_id}" for speaker_id in speaker_ids)
-#             # Write combined speaker/timestamp line
-#             file.write(f"[{speaker_label}] ({start_time}s - {end_time}s):\n")
-#             # Write each text segment separated by newlines
-#             for text in texts:
-#                 file.write(text + "\n")
-#             file.write("\n")
-
-#         for segment in transcript_data:
-#             # If the segment has the same speaker(s), combine the texts
-#             if segment['speaker_ids'] == previous_speaker_ids:
-#                 segment_texts.append(segment['text'])
-#                 end_time = segment['end_time']  # Update the end time to the current segment's end time
-#             else:
-#                 # If we have a previous speaker, write the combined segment
-#                 if previous_speaker_ids is not None:
-#                     write_segment(previous_speaker_ids, segment_start_time, end_time, segment_texts)
+        def write_segment(file, speaker_ids, start_time, end_time, texts):
+            speaker_label = " & ".join(f"Speaker {speaker_id}" for speaker_id in speaker_ids)
                 
-#                 # Reset for the new speaker segment
-#                 previous_speaker_ids = segment['speaker_ids']
-#                 segment_start_time = segment['start_time']
-#                 end_time = segment['end_time']
-#                 segment_texts = [segment['text']]
+            def format_time(seconds):
+                minutes = int(seconds) // 60
+                seconds = round(seconds % 60)
+                return f"{minutes}:{seconds:02d}"  # format seconds as two digits
+            
+            formatted_start = format_time(float(start_time))
+            formatted_end = format_time(float(end_time))
+            
+            # Write combined speaker/timestamp line
+            file.write(f"[{speaker_label}] ({formatted_start} - {formatted_end}):\n")
+            # Write each text segment separated by newlines
+            for text in texts:
+                file.write(text + "\n")
+            file.write("\n")
 
-#         # Make sure to write the last segment
-#         if previous_speaker_ids is not None:
-#             write_segment(previous_speaker_ids, segment_start_time, end_time, segment_texts)
+        for segment in transcript_data:
 
-#     return filename
+            # If the segment has the same speaker(s), combine the texts
+            if segment['speaker_ids'] == previous_speaker_ids:
+                segment_texts.append(segment['text'])
+                end_time = segment['end_time']  # Update the end time to the current segment's end time
+            else:
+                # If we have a previous speaker, write the combined segment
+                if previous_speaker_ids is not None:
+                    write_segment(file, previous_speaker_ids, segment_start_time, end_time, segment_texts)
+                
+                # Reset for the new speaker segment
+                previous_speaker_ids = segment['speaker_ids']
+                segment_start_time = segment['start_time']
+                end_time = segment['end_time']
+                segment_texts = [segment['text']]
 
-def send_audio_file(file_path, email):
-    # Determine the content-type based on the file extension
-    if file_path.lower().endswith('.wav'):
-        content_type = 'audio/wav'
-    elif file_path.lower().endswith('.mp3'):
-        content_type = 'audio/mpeg'
-    else:
-        raise ValueError("Unsupported file type. Please use either .mp3 or .wav files.")
-    
-    # Get the filename from the file path
-    filename = os.path.basename(file_path)
-    
-    # Open the audio file in binary mode
-    with open(file_path, 'rb') as file:
-        # Constructing the files dictionary to send files
-        files = {'audio_file': (filename, file, content_type)}
-        
-        # Constructing the data dictionary to send additional data
-        data = {'email': email}
-        
-        # Make the POST request to the server endpoint
-        url = os.getenv("ml_model_api_url")
-        
-        # Include both files and data in the POST request
-        response = requests.post(f"{url}/whisper_asr", files=files, data=data)
-        
-        return response
+        # Make sure to write the last segment
+        if previous_speaker_ids is not None:
+            write_segment(file, previous_speaker_ids, segment_start_time, end_time, segment_texts)
+
+    return filename
 
 def allowed_file(filename):
   ALLOWED_EXTENSIONS = {'mp3', 'wav'}
@@ -249,60 +224,52 @@ def init_transcription():
         
   # Save file to the server
   audio_file.save(audio_file_path)
-  # speaker_results = speaker_diarization(audio_file_path)
-  # transcription_details = perform_asr(audio_file_path)
-  # full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
-  # transcript_file = display_transcript(full_transcript)
+  speaker_results = speaker_diarization(audio_file_path)
+  transcription_details = perform_asr(audio_file_path)
+  full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
+  transcript_file = display_transcript(full_transcript)
 
+  try:
+    os.remove(audio_file_path)
+  except OSError as e:
+    print("Error: %s : %s" % (audio_file_path, e.strerror))
 
-  # response = {
-  #   "filename": transcript_file,
-  #   "speakers": speaker_summaries
-  # }
+  return jsonify({"message": transcript_file}), 200
 
-  # Check if email is part of the form data
-  if 'email' not in request.form:
-      return jsonify({"error": "Missing email"}), 400
-  email = request.form['email']
+# @transcript_bp.route("/grab_file", methods=["POST"])
+# def grab_file():
+#     # Check if it's JSON body
+#     if not request.json or 'grab_file_name' not in request.json:
+#         return jsonify({'error': 'No file name provided'}), 400
 
-  response = send_audio_file(audio_file_path, email)
+#     grab_file_name = request.json['grab_file_name']
 
-  return jsonify({"message": "Started processing"}), 200
+#     # URL of the external API that returns a txt file
+#     api_url = os.getenv("ml_model_api_url")
+#     if not api_url:
+#         return jsonify({'error': 'API URL is not configured'}), 500
 
-@transcript_bp.route("/grab_file", methods=["POST"])
-def grab_file():
-    # Check if it's JSON body
-    if not request.json or 'grab_file_name' not in request.json:
-        return jsonify({'error': 'No file name provided'}), 400
+#     params = {'file_name': grab_file_name}
 
-    grab_file_name = request.json['grab_file_name']
+#     # Make the API request
+#     response = requests.get(f"{api_url}/get-file", params=params, stream=True)
 
-    # URL of the external API that returns a txt file
-    api_url = os.getenv("ml_model_api_url")
-    if not api_url:
-        return jsonify({'error': 'API URL is not configured'}), 500
+#     # Check if the request was successful
+#     if response.status_code == 200:
+#         file_path = os.path.join(TRANSCRIPT_DIR, 'temp_transcripts', grab_file_name)
+#         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-    params = {'file_name': grab_file_name}
+#         # Save the txt file
+#         with open(file_path, 'wb') as file:
+#             for chunk in response.iter_content(chunk_size=8192): 
+#                 file.write(chunk)
 
-    # Make the API request
-    response = requests.get(f"{api_url}/get-file", params=params, stream=True)
+#         speakers_response = process_transcript_file(file_path)
 
-    # Check if the request was successful
-    if response.status_code == 200:
-        file_path = os.path.join(TRANSCRIPT_DIR, 'temp_transcripts', grab_file_name)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        # Save the txt file
-        with open(file_path, 'wb') as file:
-            for chunk in response.iter_content(chunk_size=8192): 
-                file.write(chunk)
-
-        speakers_response = process_transcript_file(file_path)
-
-        return jsonify({'message': 'File downloaded and processed successfully',
-                'dialogue_by_speaker': speakers_response}), 200
-    else:
-        return jsonify({'error': 'Failed to fetch file from API', 'status_code': response.status_code}), response.status_code
+#         return jsonify({'message': 'File downloaded and processed successfully',
+#                 'dialogue_by_speaker': speakers_response}), 200
+#     else:
+#         return jsonify({'error': 'Failed to fetch file from API', 'status_code': response.status_code}), response.status_code
 
 def process_transcript_file(file_path):
     # Create a dictionary to store the dialogues
@@ -347,7 +314,7 @@ def finalize_transcript():
     filename = data["filename"]
     speaker_names = data["speaker_names"]  # Expecting {'Speaker 0': 'Alice', 'Speaker 1': 'Bob'}
   
-    directory = os.path.join(current_app.root_path, 'transcription/files/temp_transcripts')
+    directory = os.path.join(current_app.root_path, 'transcription/files/transcripts')
     file_path = os.path.join(directory, filename)
   
     # Ensure the transcript file exists
@@ -371,18 +338,18 @@ def finalize_transcript():
     # Return the updated file
     return send_from_directory(directory=directory, path=filename, as_attachment=True)
 
-@transcript_bp.route('/upload', methods=['POST'])
-def upload_file():
-    # Check if the post request has the file part
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part in the request'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
+# @transcript_bp.route('/upload', methods=['POST'])
+# def upload_file():
+#     # Check if the post request has the file part
+#     if 'file' not in request.files:
+#         return jsonify({'error': 'No file part in the request'}), 400
+#     file = request.files['file']
+#     if file.filename == '':
+#         return jsonify({'error': 'No file selected'}), 400
     
-    # Save the file
-    if file:
-        filename = secure_filename(file.filename)
-        save_path = os.path.join(TRANSCRIPT_DIR, "transcripts", filename)
-        file.save(save_path)
-        return jsonify({'message': 'File uploaded successfully', 'path': save_path}), 200
+#     # Save the file
+#     if file:
+#         filename = secure_filename(file.filename)
+#         save_path = os.path.join(TRANSCRIPT_DIR, "transcripts", filename)
+#         file.save(save_path)
+#         return jsonify({'message': 'File uploaded successfully', 'path': save_path}), 200

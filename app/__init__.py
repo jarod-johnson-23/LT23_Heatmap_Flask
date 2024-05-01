@@ -1,5 +1,6 @@
 import os
 import base64
+from io import BytesIO
 from flask_cors import CORS
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -8,16 +9,19 @@ from folium import Choropleth
 from dotenv import load_dotenv
 from datetime import timedelta
 from flask_bcrypt import Bcrypt
+import zipfile
 from pymongo.errors import DuplicateKeyError
 from flask import (
     Flask,
     request,
     jsonify,
+    url_for,
     send_file,
     Blueprint,
 )
 from flask_jwt_extended import JWTManager
 from itsdangerous import URLSafeTimedSerializer
+from werkzeug.utils import secure_filename
 
 # Import Blueprints
 from .basecamp.routes import routes, basecamp_bp
@@ -41,7 +45,10 @@ def create_app():
         # Base64 encode the bytes to create a URL-safe secret key
         secret_key = base64.urlsafe_b64encode(random_bytes).decode("utf-8")
         return secret_key
+    
+    UPLOAD_FOLDER = "./uploads"
 
+    app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
     app.config["TOKEN_KEY"] = os.getenv("TOKEN_KEY")
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
     app.config["JWT_SECRET_KEY"] = generate_jwt_secret_key()
@@ -74,6 +81,46 @@ def create_app():
     app.subdomain_collection.create_index("subdomain", unique=True)
     app.timestamps_collection = app.db["timestamps"]
     app.timestamps_collection.create_index("timestamp", unique=True)
+
+    @app.route("/fabric-upload", methods=['POST'])
+    def upload_file():
+        # Check if the post request has the file part
+        if 'file' not in request.files:
+            return "No file part in the request.", 400
+        file = request.files['file']
+        # If the user does not select a file, the browser submits an
+        # empty file without a filename.
+        if file.filename == '':
+            return "No file selected.", 400
+        if file:
+            # Secure the filename before storing it directly
+            filename = secure_filename(file.filename)
+            # Save the file
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            return f"File {filename} uploaded successfully.", 200
+        return "ERROR", 400
+
+    @app.route('/fabric-download')
+    def download_all_files():
+        # Memory buffer for the zip file
+        data = BytesIO()
+        with zipfile.ZipFile(data, mode='w') as z:
+            for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                # Adding file to the zip file
+                z.write(file_path, filename)
+        data.seek(0)  # Move the cursor to the beginning of the file
+
+        # Sending file to user
+        return send_file(
+            data,
+            mimetype='application/zip',
+            as_attachment=True,
+            attachment_filename='uploads.zip'
+        )
+
+    
+
 
     # Beau Joke Project
     @app.route("/joke/beau", methods=["POST"])
