@@ -14,7 +14,7 @@ from . import routes
 
 TRANSCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "files")
 
-ai_client = OpenAI(
+client = OpenAI(
     organization=os.getenv("openai_organization"),
     api_key=os.getenv("openai_api_key"),
 )
@@ -214,6 +214,7 @@ def init_transcription():
       return jsonify({"error": "No file part"}), 400
   
   audio_file = request.files['audio_input']
+  prompt = request.form.get('prompt')
   
   if audio_file.filename == '':
       return jsonify({"error": "No selected file"}), 400
@@ -228,7 +229,7 @@ def init_transcription():
   # Save file to the server
   audio_file.save(audio_file_path)
   speaker_results = speaker_diarization(audio_file_path)
-  transcription_details = perform_asr(audio_file_path)
+  transcription_details = perform_asr(audio_file_path, prompt)
   full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
   transcript_file = display_transcript(full_transcript)
 
@@ -237,42 +238,7 @@ def init_transcription():
   except OSError as e:
     print("Error: %s : %s" % (audio_file_path, e.strerror))
 
-  return jsonify({"message": transcript_file}), 200
-
-# @transcript_bp.route("/grab_file", methods=["POST"])
-# def grab_file():
-#     # Check if it's JSON body
-#     if not request.json or 'grab_file_name' not in request.json:
-#         return jsonify({'error': 'No file name provided'}), 400
-
-#     grab_file_name = request.json['grab_file_name']
-
-#     # URL of the external API that returns a txt file
-#     api_url = os.getenv("ml_model_api_url")
-#     if not api_url:
-#         return jsonify({'error': 'API URL is not configured'}), 500
-
-#     params = {'file_name': grab_file_name}
-
-#     # Make the API request
-#     response = requests.get(f"{api_url}/get-file", params=params, stream=True)
-
-#     # Check if the request was successful
-#     if response.status_code == 200:
-#         file_path = os.path.join(TRANSCRIPT_DIR, 'temp_transcripts', grab_file_name)
-#         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-#         # Save the txt file
-#         with open(file_path, 'wb') as file:
-#             for chunk in response.iter_content(chunk_size=8192): 
-#                 file.write(chunk)
-
-#         speakers_response = process_transcript_file(file_path)
-
-#         return jsonify({'message': 'File downloaded and processed successfully',
-#                 'dialogue_by_speaker': speakers_response}), 200
-#     else:
-#         return jsonify({'error': 'Failed to fetch file from API', 'status_code': response.status_code}), response.status_code
+  return jsonify({"message": transcript_file, "summaries": speaker_summaries}), 200
 
 def process_transcript_file(file_path):
     # Create a dictionary to store the dialogues
@@ -340,19 +306,3 @@ def finalize_transcript():
   
     # Return the updated file
     return send_from_directory(directory=directory, path=filename, as_attachment=True)
-
-# @transcript_bp.route('/upload', methods=['POST'])
-# def upload_file():
-#     # Check if the post request has the file part
-#     if 'file' not in request.files:
-#         return jsonify({'error': 'No file part in the request'}), 400
-#     file = request.files['file']
-#     if file.filename == '':
-#         return jsonify({'error': 'No file selected'}), 400
-    
-#     # Save the file
-#     if file:
-#         filename = secure_filename(file.filename)
-#         save_path = os.path.join(TRANSCRIPT_DIR, "transcripts", filename)
-#         file.save(save_path)
-#         return jsonify({'message': 'File uploaded successfully', 'path': save_path}), 200
