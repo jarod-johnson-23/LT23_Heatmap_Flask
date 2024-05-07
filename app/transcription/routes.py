@@ -69,6 +69,7 @@ def speaker_diarization(file_path):
 
 def perform_asr(file_path, prompt=""):
     audio_file = open(file_path, "rb")
+    print(prompt)
     response = client.audio.transcriptions.create(
         file=audio_file,
         model="whisper-1",
@@ -94,6 +95,8 @@ def perform_asr(file_path, prompt=""):
             'end_time': end_time,
             'text': text
         })
+
+    print(transcription_details)
 
     return transcription_details
 
