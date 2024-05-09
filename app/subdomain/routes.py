@@ -200,3 +200,25 @@ def get_subdomains_by_email():
     except Exception as e:
         # Handle any other exceptions
         return jsonify({"error": "Failed to retrieve subdomains", "details": str(e)}), 500
+
+@subdomain_bp.route("/get_all_subdomains", methods=["GET"])
+@jwt_required()
+def get_all_subdomains():
+    try:
+        # Query the database to get all subdomains
+        subdomains = current_app.subdomain_collection.find()
+        
+        # Convert each subdomain document to a dictionary with relevant fields
+        subdomains_list = [{
+            "subdomain": sub["subdomain"],
+            "domain": sub["domain"],
+            "redirect_url": sub["redirect_url"],
+            "is_active": sub.get("is_active", True),  # Default to `True` if `is_active` is not specified
+            "email": sub.get("email", ""),  # Add email if available
+        } for sub in subdomains]
+
+        return jsonify({"subdomains": subdomains_list}), 200
+
+    except Exception as e:
+        # Handle any other exceptions
+        return jsonify({"error": "Failed to retrieve subdomains", "details": str(e)}), 500
