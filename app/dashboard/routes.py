@@ -1,6 +1,7 @@
 import os
 import base64
 import boto3
+from botocore.exceptions import ClientError
 from bson.objectid import ObjectId
 from flask_bcrypt import Bcrypt
 from pymongo.errors import DuplicateKeyError
