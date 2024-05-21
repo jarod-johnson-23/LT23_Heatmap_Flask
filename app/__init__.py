@@ -30,6 +30,7 @@ from .toyota.routes import routes, toyota_bp
 from .heatmap.routes import routes, heatmap_bp
 from .subdomain.routes import routes, subdomain_bp
 from .transcription.routes import routes, transcript_bp
+from .targetprocess.routes import routes, targetprocess_bp
 
 
 def create_app():
@@ -64,6 +65,7 @@ def create_app():
     app.register_blueprint(heatmap_bp, url_prefix="/heatmap")
     app.register_blueprint(subdomain_bp, url_prefix="/subdomain")
     app.register_blueprint(transcript_bp, url_prefix="/transcription")
+    app.register_blueprint(targetprocess_bp, url_prefix="/targetprocess")
 
     CORS(
         app,
@@ -82,46 +84,6 @@ def create_app():
     app.timestamps_collection = app.db["timestamps"]
     app.timestamps_collection.create_index("timestamp", unique=True)
 
-    @app.route("/fabric-upload", methods=['POST'])
-    def upload_file():
-        # Check if the post request has the file part
-        if 'file' not in request.files:
-            return "No file part in the request.", 400
-        file = request.files['file']
-        # If the user does not select a file, the browser submits an
-        # empty file without a filename.
-        if file.filename == '':
-            return "No file selected.", 400
-        if file:
-            # Secure the filename before storing it directly
-            filename = secure_filename(file.filename)
-            # Save the file
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            return f"File {filename} uploaded successfully.", 200
-        return "ERROR", 400
-
-    @app.route('/fabric-download')
-    def download_all_files():
-        # Memory buffer for the zip file
-        data = BytesIO()
-        with zipfile.ZipFile(data, mode='w') as z:
-            for filename in os.listdir(app.config['UPLOAD_FOLDER']):
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                # Adding file to the zip file
-                z.write(file_path, filename)
-        data.seek(0)  # Move the cursor to the beginning of the file
-
-        # Sending file to user
-        return send_file(
-            data,
-            mimetype='application/zip',
-            as_attachment=True,
-            attachment_filename='uploads.zip'
-        )
-
-    
-
-
     # Beau Joke Project
     @app.route("/joke/beau", methods=["POST"])
     def makeJoke():
@@ -139,7 +101,7 @@ def create_app():
                 "content": "There are no previous messages in the chat log, do not worry about creating duplicate jokes.",
             }
         response = ai_client.chat.completions.create(
-            model="gpt-4-1106-preview",
+            model="gpt-4o",
             temperature=1,
             messages=[
                 {
