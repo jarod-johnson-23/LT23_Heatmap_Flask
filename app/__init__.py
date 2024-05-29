@@ -83,6 +83,8 @@ def create_app():
     app.subdomain_collection.create_index("subdomain", unique=True)
     app.timestamps_collection = app.db["timestamps"]
     app.timestamps_collection.create_index("timestamp", unique=True)
+    app.project_sow_field_collection = app.db["lt_project_sow_fields"]
+    app.project_sow_field_collection.create_index("project_num", unique=True)
 
     # Beau Joke Project
     @app.route("/joke/beau", methods=["POST"])
