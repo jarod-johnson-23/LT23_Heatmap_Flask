@@ -101,9 +101,9 @@ def sheets_update_hook():
     # Extract the relevant fields
     project_num = data.get('project_num')
     project_name = data.get('project_name')
-    SowKey = data.get('sowKey')
+    SowKey = data.get('sowKey', '')  # Default to empty string if not provided
     
-    if not project_num or not project_name or not SowKey:
+    if not project_num or not project_name:
         return jsonify({"error": "Missing required fields"}), 400
     
     # Create the filter and update documents for MongoDB
@@ -132,7 +132,7 @@ def sheets_update_hook():
         "CustomFields": [
             {
                 "Name": "SowKey",
-                "Value": SowKey
+                "Value": SowKey if SowKey is not None else ""  # Handle empty SowKey
             }
         ]
     }
