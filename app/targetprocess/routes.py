@@ -100,8 +100,8 @@ def sheets_update_hook():
     
     # Extract the relevant fields
     project_num = data.get('project_num')
-    project_name = data.get('projectName')
-    SowKey = data.get('SowKey')
+    project_name = data.get('project_name')
+    SowKey = data.get('sowKey')
     
     if not project_num or not project_name or not SowKey:
         return jsonify({"error": "Missing required fields"}), 400
