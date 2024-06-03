@@ -1,6 +1,7 @@
 from flask import Blueprint, current_app, request, jsonify
 from functools import wraps
 import os
+import io
 from datetime import datetime
 import pytz
 import requests
@@ -10,6 +11,10 @@ from pymongo import UpdateOne
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 import json
 import logging
 
@@ -18,7 +23,7 @@ targetprocess_bp = Blueprint("targetprocess_bp", __name__)
 TARGETPROCESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Define the scope and credentials file
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive.readonly"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(f'{TARGETPROCESS_DIR}/google/LT_google_sheet_sa.json', scope)
 
 # Authorize the client
@@ -89,6 +94,50 @@ def clean_html(raw_html):
 #         return jsonify({"Message": "All projects updated successfully"})
 #     except Exception as e:
 #         return jsonify({"Message": "An error occurred", "Details": str(e)}), 500
+
+@targetprocess_bp.route('/upload-sow-from-gdrive', methods=['POST'])
+def upload_sow_from_gdrive():
+    try:
+        data = request.get_json()
+        google_doc_url = data.get('google_doc_url')
+        
+        if not google_doc_url:
+            return jsonify({"error": "Missing google_doc_url"}), 400
+        
+        # Extract file ID from the Google Doc URL
+        file_id = google_doc_url.split('/')[5]
+        
+        # Build the Drive API service
+        service = build('drive', 'v3', credentials=creds)
+        
+        # Get the file metadata to retrieve the original filename
+        file_metadata = service.files().get(fileId=file_id, fields='name').execute()
+        original_filename = file_metadata.get('name')
+        
+        # Download the Google Doc as PDF
+        request = service.files().export_media(fileId=file_id, mimeType='application/pdf')
+        download_dir = f'{TARGETPROCESS_DIR}/temp_files'  # Specify your desired directory
+        os.makedirs(download_dir, exist_ok=True)
+        file_name = os.path.join(download_dir, f'{original_filename}.pdf')
+        fh = io.FileIO(file_name, 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+            print(f"Download {int(status.progress() * 100)}%.")
+
+        print(f"File downloaded as {file_name}")
+        
+        # Perform operations on the downloaded file
+        with open(file_name, 'rb') as file:
+            content = file.read()
+            # Do something with the content, for example, return its length
+            file_content_length = len(content)
+        
+        return jsonify({"message": "File downloaded and processed successfully", "original_filename": original_filename, "file_content_length": file_content_length}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @targetprocess_bp.route('/sheets-update-hook', methods=['POST'])
 def sheets_update_hook():
