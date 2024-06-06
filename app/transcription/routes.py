@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from collections import defaultdict
 from openai import OpenAI
+from pydub import AudioSegment
 
 transcript_bp = Blueprint("transcript_bp", __name__)
 
@@ -43,6 +44,7 @@ def speaker_diarization(file_path):
   if response.status_code == 200:
       # Parse the JSON response
       response_json = response.json()
+      print(response.json())
       # Extract utterances
       utterances = response_json.get('results', {}).get('utterances', [])
       
@@ -68,16 +70,18 @@ def speaker_diarization(file_path):
       print(f"Error: API request failed with status code {response.status_code}")
 
 def perform_asr(file_path, prompt=""):
+    prompt += " LT, LaneTerralever"
     audio_file = open(file_path, "rb")
-    print(prompt)
     response = client.audio.transcriptions.create(
         file=audio_file,
         model="whisper-1",
         response_format="verbose_json",
         timestamp_granularities=["segment"],
+        language="en",
         prompt=prompt
     )
 
+    print(response)
     speaker_segments = response.segments
 
     # Initialize a list to hold transcription details
@@ -95,8 +99,6 @@ def perform_asr(file_path, prompt=""):
             'end_time': end_time,
             'text': text
         })
-
-    print(transcription_details)
 
     return transcription_details
 
@@ -206,42 +208,60 @@ def display_transcript(transcript_data):
     return filename
 
 def allowed_file(filename):
-  ALLOWED_EXTENSIONS = {'mp3', 'wav'}
-  
-  # Split the filename by '.' and check if the last part (extension) is in the allowed set
-  return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    ALLOWED_EXTENSIONS = {'mp3', 'wav', 'mp4', 'm4a', 'aac', 'ogg'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def convert_to_mp3(audio_file_path, filename):
+    try:
+        audio = AudioSegment.from_file(audio_file_path)
+        mp3_filename = f"{os.path.splitext(filename)[0]}.mp3"
+        mp3_file_path = os.path.join(os.path.dirname(audio_file_path), mp3_filename)
+        audio.export(mp3_file_path, format="mp3")
+        return mp3_file_path
+    except Exception as e:
+        print(f"Error converting {filename} to MP3: {e}")
+        return None
 
 @transcript_bp.route("/mp3", methods=["POST"])
 def init_transcription():
-  if 'audio_input' not in request.files:
-      return jsonify({"error": "No file part"}), 400
-  
-  audio_file = request.files['audio_input']
-  prompt = request.form.get('prompt')
-  
-  if audio_file.filename == '':
-      return jsonify({"error": "No selected file"}), 400
-  
-  if audio_file and allowed_file(audio_file.filename):
-      filename = secure_filename(audio_file.filename)
-      
-      # Create a unique or specific directory for audio files if doesn't exist
-      audio_file_path = os.path.join(current_app.root_path, 'transcription/files/audio', filename)
-      os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
+    if 'audio_input' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+
+    audio_file = request.files['audio_input']
+    prompt = request.form.get('prompt')
+
+    if audio_file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if audio_file and allowed_file(audio_file.filename):
+        filename = secure_filename(audio_file.filename)
         
-  # Save file to the server
-  audio_file.save(audio_file_path)
-  speaker_results = speaker_diarization(audio_file_path)
-  transcription_details = perform_asr(audio_file_path, prompt)
-  full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
-  transcript_file = display_transcript(full_transcript)
+        # Create a unique or specific directory for audio files if doesn't exist
+        audio_file_path = os.path.join(current_app.root_path, 'transcription/files/audio', filename)
+        os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
 
-  try:
-    os.remove(audio_file_path)
-  except OSError as e:
-    print("Error: %s : %s" % (audio_file_path, e.strerror))
+        # Save the uploaded file
+        audio_file.save(audio_file_path)
 
-  return jsonify({"message": transcript_file, "summaries": speaker_summaries}), 200
+        # Convert to MP3 if necessary
+        if not filename.endswith('.mp3'):
+            audio_file_path = convert_to_mp3(audio_file_path, filename)
+            if audio_file_path is None:
+                return jsonify({"error": "Failed to convert file to MP3"}), 400
+
+        speaker_results = speaker_diarization(audio_file_path)
+        transcription_details = perform_asr(audio_file_path, prompt)
+        full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
+        transcript_file = display_transcript(full_transcript)
+
+        try:
+            os.remove(audio_file_path)
+        except OSError as e:
+            print(f"Error: {audio_file_path} : {e.strerror}")
+
+        return jsonify({"message": transcript_file, "summaries": speaker_summaries}), 200
+    else:
+        return jsonify({"error": "File type not allowed"}), 400
 
 def process_transcript_file(file_path):
     # Create a dictionary to store the dialogues

@@ -13,10 +13,19 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import json
 import logging
+from flask_jwt_extended import jwt_required
+from openai import OpenAI
+import pdfplumber
+from PIL import Image
+from pdf2image import convert_from_path
+from docx import Document
+import pytesseract
+
 
 targetprocess_bp = Blueprint("targetprocess_bp", __name__)
 
@@ -28,6 +37,11 @@ creds = ServiceAccountCredentials.from_json_keyfile_name(f'{TARGETPROCESS_DIR}/g
 
 # Authorize the client
 client = gspread.authorize(creds)
+
+client = OpenAI(
+    organization=os.getenv("openai_organization"),
+    api_key=os.getenv("openai_api_key"),
+)
 
 from . import routes
 
@@ -399,3 +413,121 @@ def get_user_stories(file_name):
                 story['tasks'] = []  # Or handle errors as needed
 
     return jsonify(targetprocess_data)
+
+def convert_pdf_to_txt(input_stream):
+    """Convert a PDF file to a text file stream. Use OCR if the PDF is scanned."""
+    all_text = ''
+    with pdfplumber.open(input_stream) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                all_text += page_text
+    if not all_text:
+        # Use OCR for scanned PDF
+        all_text = extract_text_via_ocr(input_stream)
+    return io.StringIO(all_text)
+
+def extract_text_via_ocr(pdf_stream):
+    """Extract text from a scanned PDF using OCR."""
+    images = convert_from_path(pdf_stream)
+    extracted_text = ''
+    for img in images:
+        extracted_text += pytesseract.image_to_string(img)
+    return extracted_text
+
+def convert_docx_to_txt(input_stream):
+    """Convert a DOCX file to a text file stream."""
+    doc = Document(input_stream)
+    all_text = []
+    for paragraph in doc.paragraphs:
+        all_text.append(paragraph.text)
+    return io.StringIO('\n'.join(all_text))
+
+def process_file(file_stream, ext):
+    """Process a file and upload it to the vector store."""
+    if ext == "txt":
+        file_stream.seek(0)
+    elif ext == "pdf":
+        file_stream = convert_pdf_to_txt(file_stream)
+    elif ext == "docx":
+        file_stream = convert_docx_to_txt(file_stream)
+    else:
+        return jsonify({"error": "Unsupported file type"}), 400
+    
+    client.beta.vector_stores.file_batches.upload_and_poll(
+        vector_store_id="vs_ziPsnk1FAuN4iH55CnZePmLs", files=[file_stream]
+    )
+
+def download_file_from_google_drive(file_id, creds):
+    """Download a file from Google Drive."""
+    service = build('drive', 'v3', credentials=creds)
+    request = service.files().get_media(fileId=file_id)
+    file_stream = io.BytesIO()
+    downloader = MediaIoBaseDownload(file_stream, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+    file_stream.seek(0)
+    return file_stream
+
+def download_file_from_google_docs(file_id, creds):
+    """Download a Google Doc file as a PDF."""
+    service = build('drive', 'v3', credentials=creds)
+    request = service.files().export_media(fileId=file_id, mimeType='application/pdf')
+    file_stream = io.BytesIO()
+    downloader = MediaIoBaseDownload(file_stream, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+    file_stream.seek(0)
+    return file_stream
+
+@targetprocess_bp.route('/sow/file-upload', methods=['POST'])
+@jwt_required()
+def sow_file_upload():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    file = request.files['file']
+    file_stream = io.BytesIO(file.read())
+    ext = file.filename.split('.')[-1].lower()
+    process_file(file_stream, ext)
+    return jsonify({"message": "File uploaded and processed successfully"}), 200
+
+@targetprocess_bp.route('/sow/google-doc-upload', methods=['POST'])
+@jwt_required()
+def sow_gdoc_upload():
+    data = request.get_json()
+    if 'doc_url' not in data:
+        return jsonify({"error": "No Google Doc URL provided"}), 400
+    doc_url = data['doc_url']
+    file_id = doc_url.split('/')[-2]
+
+    creds = service_account.Credentials.from_service_account_file(
+        'path_to_service_account.json', scopes=[
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file"
+        ]
+    )
+    file_stream = download_file_from_google_docs(file_id, creds)
+    process_file(file_stream, 'pdf')  # Google Docs are exported as PDF
+    return jsonify({"message": "Google Doc downloaded and processed successfully"}), 200
+
+@targetprocess_bp.route('/sow/google-drive-upload', methods=['POST'])
+@jwt_required()
+def sow_gdrive_upload():
+    data = request.get_json()
+    if 'drive_url' not in data:
+        return jsonify({"error": "No Google Drive URL provided"}), 400
+    drive_url = data['drive_url']
+    file_id = drive_url.split('/')[-2]
+
+    creds = service_account.Credentials.from_service_account_file(
+        'path_to_service_account.json', scopes=[
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file"
+        ]
+    )
+    file_stream = download_file_from_google_drive(file_id, creds)
+    file_ext = data.get('file_extension', 'pdf')  # Assume PDF by default, adjust as needed
+    process_file(file_stream, file_ext)
+    return jsonify({"message": "Google Drive file downloaded and processed successfully"}), 200
