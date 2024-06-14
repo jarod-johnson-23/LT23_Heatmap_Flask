@@ -148,7 +148,10 @@ def create_app():
     
     @app.route('/get-ip', methods=['GET'])
     def get_ip():
-        ip = request.remote_addr
+        if request.headers.getlist("X-Forwarded-For"):
+            ip = request.headers.getlist("X-Forwarded-For")[0]
+        else:
+            ip = request.remote_addr
         return jsonify({'ip': ip})
 
     @app.route("/")
