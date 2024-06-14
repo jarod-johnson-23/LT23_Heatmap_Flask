@@ -358,6 +358,15 @@ def get_user_stories_by_proj_id(project_id):
 @targetprocess_bp.route('/userstories/sow/<file_name>', methods=['GET'])
 @api_key_required
 def get_user_stories(file_name):
+    # List of common file extensions to remove
+    common_extensions = ['.pdf', '.docx', '.doc', '.txt', '.xlsx']
+
+    # Remove common file extensions from file_name if present
+    for ext in common_extensions:
+        if file_name.endswith(ext):
+            file_name = file_name[:-len(ext)]
+            break
+
     url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userstories"
     query_params = {
         'where': f'(Project.SowKey={file_name})',

@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, send_file, current_app, send_from_directory
+from flask import Blueprint, request, jsonify, send_file, current_app, send_from_directory, Response
 from werkzeug.utils import secure_filename
 import os
 import requests
@@ -329,3 +329,12 @@ def finalize_transcript():
   
     # Return the updated file
     return send_from_directory(directory=directory, path=filename, as_attachment=True)
+
+@transcript_bp.route("/ping", methods=['GET'])
+def ping():
+    try:
+        response = requests.get("https://ltcocopah.com/ping")
+        return Response(response.content, status=response.status_code, content_type=response.headers['Content-Type'])
+    except requests.exceptions.RequestException as e:
+        # Handle any exceptions that occur during the request
+        return Response(str(e), status=500)

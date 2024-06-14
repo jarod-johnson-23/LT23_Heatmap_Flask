@@ -9,6 +9,7 @@ from folium import Choropleth
 from dotenv import load_dotenv
 from datetime import timedelta
 from flask_bcrypt import Bcrypt
+from flask_socketio import SocketIO
 import zipfile
 from pymongo.errors import DuplicateKeyError
 from flask import (
@@ -31,11 +32,16 @@ from .heatmap.routes import routes, heatmap_bp
 from .subdomain.routes import routes, subdomain_bp
 from .transcription.routes import routes, transcript_bp
 from .targetprocess.routes import routes, targetprocess_bp
+from .assistants.routes import routes, assistants_bp, setup_socketio
 
 
 def create_app():
     # Create Flask app instance
     app = Flask(__name__)
+
+    socketio = SocketIO(app, manage_session=False)
+    setup_socketio(socketio)
+
 
     load_dotenv()
 
@@ -66,6 +72,9 @@ def create_app():
     app.register_blueprint(subdomain_bp, url_prefix="/subdomain")
     app.register_blueprint(transcript_bp, url_prefix="/transcription")
     app.register_blueprint(targetprocess_bp, url_prefix="/targetprocess")
+    app.register_blueprint(assistants_bp, url_prefix="/assistants")
+
+    assistants_bp.socketio = socketio
 
     CORS(
         app,
@@ -135,6 +144,14 @@ def create_app():
         if moderation.results[0].flagged:
             return jsonify({"error": "joke was deemed inappropriate"}), 304
         return str(response.choices[0].message.content)
+    
+    @app.route('/get-ip', methods=['GET'])
+    def get_ip():
+        if request.headers.getlist("X-Forwarded-For"):
+            ip = request.headers.getlist("X-Forwarded-For")[0]
+        else:
+            ip = request.remote_addr
+        return jsonify({'ip': ip})
 
     @app.route("/")
     def index():
