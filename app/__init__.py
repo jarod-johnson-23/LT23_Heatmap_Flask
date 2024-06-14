@@ -40,8 +40,8 @@ def create_app():
     # Create Flask app instance
     app = Flask(__name__)
 
-    socketio = SocketIO(app, manage_session=False)
-    setup_socketio(socketio)
+    # socketio = SocketIO(app, manage_session=False)
+    # setup_socketio(socketio)
 
 
     load_dotenv()
