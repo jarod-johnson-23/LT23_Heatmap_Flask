@@ -33,7 +33,7 @@ from .heatmap.routes import routes, heatmap_bp
 from .subdomain.routes import routes, subdomain_bp
 from .transcription.routes import routes, transcript_bp
 from .targetprocess.routes import routes, targetprocess_bp
-from .assistants.routes import routes, assistants_bp, setup_socketio
+from .assistants.routes import routes, assistants_bp
 
 
 def create_app():
