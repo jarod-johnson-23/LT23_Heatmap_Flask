@@ -75,7 +75,7 @@ def create_app():
     app.register_blueprint(targetprocess_bp, url_prefix="/targetprocess")
     app.register_blueprint(assistants_bp, url_prefix="/assistants")
 
-    assistants_bp.socketio = socketio
+    # assistants_bp.socketio = socketio
 
     CORS(
         app,
