@@ -39,6 +39,8 @@ from .transcription.routes import routes, transcript_bp
 from .targetprocess.routes import routes, targetprocess_bp
 from .assistants.routes import routes, assistants_bp, setup_socketio
 
+socketio = None
+
 def create_app():
     # Create Flask app instance
     app = Flask(__name__)
