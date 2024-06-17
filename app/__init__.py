@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import base64
 from io import BytesIO
 from flask_cors import CORS
@@ -6,7 +10,6 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from folium import Choropleth
-from dotenv import load_dotenv
 from datetime import timedelta
 from flask_bcrypt import Bcrypt
 from flask_socketio import SocketIO
@@ -39,8 +42,6 @@ from .assistants.routes import routes, assistants_bp, setup_socketio
 def create_app():
     # Create Flask app instance
     app = Flask(__name__)
-
-    load_dotenv()
 
     CORS(
         app,
