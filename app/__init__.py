@@ -39,6 +39,8 @@ from .transcription.routes import routes, transcript_bp
 from .targetprocess.routes import routes, targetprocess_bp
 from .assistants.routes import routes, assistants_bp, setup_socketio
 
+socketio = SocketIO()
+
 def create_app():
     # Create Flask app instance
     app = Flask(__name__)
@@ -50,7 +52,7 @@ def create_app():
     )
 
     # Initialize socketio
-    socketio = SocketIO(app, cors_allowed_origins=os.getenv("base_url_react"), manage_session=False)
+    socketio.init_app(app, cors_allowed_origins=os.getenv("base_url_react"), manage_session=False)
     setup_socketio(socketio)
 
     # LT Web Tool Dashboard Project
