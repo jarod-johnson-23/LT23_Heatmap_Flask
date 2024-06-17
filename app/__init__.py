@@ -1,5 +1,3 @@
-from gevent import monkey
-monkey.patch_all()
 import os
 import base64
 from io import BytesIO
