@@ -1,3 +1,5 @@
+from gevent import monkey
+monkey.patch_all()
 import os
 import base64
 from io import BytesIO
@@ -25,6 +27,7 @@ from flask_jwt_extended import JWTManager
 from itsdangerous import URLSafeTimedSerializer
 from werkzeug.utils import secure_filename
 
+
 # Import Blueprints
 from .basecamp.routes import routes, basecamp_bp
 from .dashboard.routes import routes, dashboard_bp
@@ -33,18 +36,23 @@ from .heatmap.routes import routes, heatmap_bp
 from .subdomain.routes import routes, subdomain_bp
 from .transcription.routes import routes, transcript_bp
 from .targetprocess.routes import routes, targetprocess_bp
-from .assistants.routes import routes, assistants_bp
-
+from .assistants.routes import routes, assistants_bp, setup_socketio
 
 def create_app():
     # Create Flask app instance
     app = Flask(__name__)
 
-    # socketio = SocketIO(app, manage_session=False)
-    # setup_socketio(socketio)
-
-
     load_dotenv()
+
+    CORS(
+        app,
+        resources={r"/*": {"origins": os.getenv("base_url_react")}},
+        supports_credentials=True,
+    )
+
+    # Initialize socketio
+    socketio = SocketIO(app, cors_allowed_origins=os.getenv("base_url_react"), manage_session=False)
+    setup_socketio(socketio)
 
     # LT Web Tool Dashboard Project
     def generate_jwt_secret_key(length=64):
@@ -55,11 +63,12 @@ def create_app():
         return secret_key
     
     UPLOAD_FOLDER = "./uploads"
-
     app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
     app.config["TOKEN_KEY"] = os.getenv("TOKEN_KEY")
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
-    app.config["JWT_SECRET_KEY"] = generate_jwt_secret_key()
+    jwt_secret_key = generate_jwt_secret_key()
+    app.config["JWT_SECRET_KEY"] = jwt_secret_key
+    app.secret_key = jwt_secret_key  # Set the secret_key for Flask session
 
     app.bcrypt = Bcrypt(app)
     app.jwt = JWTManager(app)
@@ -74,14 +83,6 @@ def create_app():
     app.register_blueprint(transcript_bp, url_prefix="/transcription")
     app.register_blueprint(targetprocess_bp, url_prefix="/targetprocess")
     app.register_blueprint(assistants_bp, url_prefix="/assistants")
-
-    # assistants_bp.socketio = socketio
-
-    CORS(
-        app,
-        resources={r"/*": {"origins": os.getenv("base_url_react")}},
-        supports_credentials=True,
-    )
 
     # Configure Flask-PyMongo
     mongo_uri = os.getenv("mongo_uri")
