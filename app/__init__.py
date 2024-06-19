@@ -159,5 +159,38 @@ def create_app():
     @app.route("/")
     def index():
         return {"STATUS": "SUCCESS", "CODE": 200}
+    
+    @app.route('/mailing-list-generation', methods=['POST'])
+    def generate_mailing_list():
+        # Retrieve special offer data
+        offer_data = request.form.get('offerData')
+        
+        # Initialize the response dictionary
+        response = {
+            'offerData': offer_data,
+            'files': {}
+        }
+        
+        # Check and add file information to the response
+        files_to_check = [
+            'offerTable', 'activePatrons', 'wmyPatrons', 'wsmyPatrons', 'seasonalPatrons', 
+            'patriotCardPatrons', 'claTierPatrons'
+        ]
+        
+        for file_key in files_to_check:
+            if file_key in request.files:
+                file = request.files[file_key]
+                response['files'][file_key] = {
+                    'filename': file.filename,
+                    'content_type': file.content_type,
+                    'size': len(file.read())
+                }
+            else:
+                response['files'][file_key] = 'No file uploaded'
+
+        print(jsonify(response))
+        
+        # Return the response as JSON
+        return jsonify(response)
 
     return app

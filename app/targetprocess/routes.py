@@ -369,7 +369,7 @@ def get_user_stories(file_name):
 
     url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userstories"
     query_params = {
-        'where': f'(Project.SowKey={file_name})',
+        'where': f'(Project.SowKey=\'{file_name}\')',
         'select': '{name,Description,StartDate,Effort,EarnedValueDollars,PricingTypeOverride}',
         'access_token': os.getenv('TP_API_KEY')
     }
