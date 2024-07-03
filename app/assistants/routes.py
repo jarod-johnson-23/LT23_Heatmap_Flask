@@ -1,10 +1,11 @@
-from flask import Blueprint, session, request
+from flask import Blueprint, session, request, send_file, jsonify
 from flask_socketio import emit, join_room
-from openai import OpenAI, AssistantEventHandler
+from openai import OpenAI, AssistantEventHandlerL
 import uuid
 import requests
 import os
 import json
+import mimetypes
 
 assistants_bp = Blueprint("assistants_bp", __name__)
 from . import routes
@@ -14,6 +15,8 @@ client = OpenAI(
     organization=os.getenv("openai_organization"),
     api_key=os.getenv("openai_api_key"),
 )
+
+ASSISTANTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Use the provided assistant ID from the environment
 assistant_id = os.getenv("SOW_ASSISTANT_ID")
@@ -25,6 +28,35 @@ def before_request():
     if 'thread_id' not in session:
         thread = client.beta.threads.create()
         session['thread_id'] = thread.id  # Accessing the 'id' attribute correctly
+
+@assistants_bp.route("/download_file", methods=['POST'])
+def download_openai_file():
+    # Get the filename from the request
+    data = request.get_json()
+    print(data)
+    file_id = data.get('file_id')
+    filename = data.get('filename')
+    print("File ID: ",file_id)
+    print("File Name: ",filename)
+    
+    if not filename:
+        return jsonify({"error": "Filename is required"}), 400
+
+    # Determine the file extension and type
+    file_extension = filename.split('.')[-1]
+    mime_type, _ = mimetypes.guess_type(filename)
+
+    # Get the content of the file
+    response = client.files.content(file_id)
+    content = response.read()
+
+    # Save the content to a temporary file
+    temp_file_path = f"/tmp/{filename}_{file_id}"
+    with open(temp_file_path, 'wb') as file:
+        file.write(content)
+
+    # Send the file to the client with the appropriate MIME type
+    return send_file(temp_file_path, as_attachment=True, mimetype=mime_type, download_name=filename)
 
 def setup_socketio(socketio):
     @socketio.on('connect', namespace='/assistants')
@@ -42,6 +74,7 @@ def setup_socketio(socketio):
     @socketio.on('sow_chat', namespace='/assistants')
     def handle_message(data):
         user_id = session.get('user_id')
+        print(user_id)
         thread_id = session.get('thread_id')
 
         if not thread_id:
@@ -67,9 +100,27 @@ def setup_socketio(socketio):
                   emit('new_message', {'message': delta.value}, room=user_id, namespace='/assistants')
 
           def on_event(self, event):
-              if event.event == 'thread.run.requires_action':
-                  run_id = event.data.id
-                  self.handle_requires_action(event.data, run_id)
+            if event.event == 'thread.run.requires_action':
+                run_id = event.data.id
+                self.handle_requires_action(event.data, run_id)
+            elif event.event == 'thread.message.completed':
+                if event.data.attachments:
+                    for attachment in event.data.attachments:
+                        file_id = attachment.file_id
+                        # Extract filename from the content
+                        filename = None
+                        for content_block in event.data.content:
+                            if content_block.text.annotations:
+                                for annotation in content_block.text.annotations:
+                                    if annotation.file_path.file_id == file_id:
+                                        filename = annotation.text.split('/')[-1]
+                                        break
+                            if filename:
+                                break
+                        
+                        if filename:
+                            emit('file_created', {'filename': filename, 'file_id': file_id}, room=user_id, namespace='/assistants')
+                        
 
           def handle_requires_action(self, data, run_id):
               tool_outputs = []
@@ -104,6 +155,7 @@ def setup_socketio(socketio):
               
               self.submit_tool_outputs(tool_outputs, run_id)
 
+
           def submit_tool_outputs(self, tool_outputs, run_id):
               with client.beta.threads.runs.submit_tool_outputs_stream(
                   thread_id=self.current_run.thread_id,
@@ -116,7 +168,6 @@ def setup_socketio(socketio):
                   print()
 
           def on_end(self):
-              print("on_end called")
               emit('message_done', room=user_id, namespace='/assistants')
 
         # Run the thread and stream the response
