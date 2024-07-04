@@ -1,6 +1,6 @@
 from flask import Blueprint, session, request, send_file, jsonify
 from flask_socketio import emit, join_room
-from openai import OpenAI, AssistantEventHandlerL
+from openai import OpenAI, AssistantEventHandler
 import uuid
 import requests
 import os
