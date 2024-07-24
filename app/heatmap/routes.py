@@ -270,7 +270,6 @@ def get_column_names_from_indices(df, sec_col_input):
     return column_names
 
 
-# Zipcode Heatmap Generation Project
 @heatmap_bp.route("/zipcode", methods=["POST"])
 def generate_heatmap():
     if "excel_file" not in request.files:
@@ -302,15 +301,15 @@ def generate_heatmap():
         max_value = input_df[col_names[main_col]].max()
         min_value = input_df[col_names[main_col]].min()
 
-        input_df[col_names[zip_col]] = input_df[col_names[zip_col]].astype(str)
+        # Ensure zip codes are treated as strings
+        input_df[col_names[zip_col]] = input_df[col_names[zip_col]].astype(str).str.zfill(5)
 
-        input_df["Parsed Zip Code"] = (
-            input_df[col_names[zip_col]].str.extract(r"(\d{5})")[0].astype(str)
-        )
+        # Extract the zip codes while ensuring leading zeros are kept
+        input_df["Parsed Zip Code"] = input_df[col_names[zip_col]].str.extract(r"(\d{5})")[0].astype(str).str.zfill(5)
 
         us_zips = pd.read_csv(ZIPS_DIR, dtype={"zip_code": str})
 
-        us_zips["zip_code"] = us_zips["zip_code"].astype(str)
+        us_zips["zip_code"] = us_zips["zip_code"].astype(str).str.zfill(5)
 
         merged_data = pd.merge(
             input_df,
@@ -319,6 +318,10 @@ def generate_heatmap():
             left_on="Parsed Zip Code",
             right_on="zip_code",
         )
+
+        # Filter out rows where the zip code was not found in us_zips
+        merged_data = merged_data[merged_data["zip_code"].notnull()]
+        print(merged_data)
 
         unique_codes = merged_data["state_code"].unique().tolist()
         state_values = []
