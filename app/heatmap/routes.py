@@ -321,7 +321,6 @@ def generate_heatmap():
 
         # Filter out rows where the zip code was not found in us_zips
         merged_data = merged_data[merged_data["zip_code"].notnull()]
-        print(merged_data)
 
         unique_codes = merged_data["state_code"].unique().tolist()
         state_values = []
