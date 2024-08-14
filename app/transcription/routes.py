@@ -20,6 +20,12 @@ client = OpenAI(
     api_key=os.getenv("openai_api_key"),
 )
 
+def log_to_file(message):
+    log_file_path = os.path.join(current_app.root_path, 'transcription/logs/log.txt')
+    os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+    with open(log_file_path, 'a') as log_file:
+        log_file.write(f"{datetime.now()}: {message}\n")
+
 def speaker_diarization(file_path):
   api_key = os.getenv('deepgram_api_key')
 
@@ -44,7 +50,6 @@ def speaker_diarization(file_path):
   if response.status_code == 200:
       # Parse the JSON response
       response_json = response.json()
-      print(response.json())
       # Extract utterances
       utterances = response_json.get('results', {}).get('utterances', [])
       
@@ -65,12 +70,12 @@ def speaker_diarization(file_path):
           
           speaker_details.append(speaker_detail)
       # Now speaker_details contains the requested information
+      log_to_file(speaker_details)
       return speaker_details
   else:
       print(f"Error: API request failed with status code {response.status_code}")
 
 def perform_asr(file_path, prompt=""):
-    prompt += " LT, LaneTerralever"
     audio_file = open(file_path, "rb")
     response = client.audio.transcriptions.create(
         file=audio_file,
@@ -78,10 +83,8 @@ def perform_asr(file_path, prompt=""):
         response_format="verbose_json",
         timestamp_granularities=["segment"],
         language="en",
-        prompt=prompt
     )
 
-    print(response)
     speaker_segments = response.segments
 
     # Initialize a list to hold transcription details
@@ -106,10 +109,10 @@ def perform_asr(file_path, prompt=""):
 def combine_speaker_and_transcription(speaker_results, transcription_details):
     combined_transcript = []
     speaker_lines = {}  # To hold the lines spoken by each speaker
-    
-    def calculate_overlap(speaker, trans_start, trans_end):
-        overlap_start = max(speaker['start_timestamp'], trans_start)
-        overlap_end = min(speaker['end_timestamp'], trans_end)        
+
+    def calculate_overlap(speaker_start, speaker_end, trans_start, trans_end):
+        overlap_start = max(speaker_start, trans_start)
+        overlap_end = min(speaker_end, trans_end)
         overlap_duration = max(0, overlap_end - overlap_start)
         return overlap_duration
 
@@ -117,10 +120,32 @@ def combine_speaker_and_transcription(speaker_results, transcription_details):
         trans_start = transcription['start_time']
         trans_end = transcription['end_time']
 
+        # Normalize the speaker segments based on the current transcription start time
+        normalized_speaker_results = [
+            {
+                'speaker_id': speaker['speaker_id'],
+                'start_timestamp': speaker['start_timestamp'] - trans_start,
+                'end_timestamp': speaker['end_timestamp'] - trans_start
+            }
+            for speaker in speaker_results
+        ]
+
+        # Normalize the transcription segment so it starts at 0
+        normalized_trans_start = 0
+        normalized_trans_end = trans_end - trans_start
+
         # Generate list of (speaker, overlap_time) tuples
         overlap_list = [
-            (speaker['speaker_id'], calculate_overlap(speaker, trans_start, trans_end)) 
-            for speaker in speaker_results
+            (
+                speaker['speaker_id'], 
+                calculate_overlap(
+                    speaker['start_timestamp'], 
+                    speaker['end_timestamp'], 
+                    normalized_trans_start, 
+                    normalized_trans_end
+                )
+            )
+            for speaker in normalized_speaker_results
         ]
 
         # Find the maximum overlap time
@@ -136,8 +161,8 @@ def combine_speaker_and_transcription(speaker_results, transcription_details):
         if chosen_speakers:
             combined_segment = {
                 'speaker_ids': list(chosen_speakers),
-                'start_time': trans_start,
-                'end_time': trans_end, 
+                'start_time': transcription['start_time'],  # Use original (unnormalized) time for output
+                'end_time': transcription['end_time'],  # Use original (unnormalized) time for output
                 'text': transcription['text']
             }
             combined_transcript.append(combined_segment)
@@ -234,34 +259,45 @@ def init_transcription():
         return jsonify({"error": "No selected file"}), 400
 
     if audio_file and allowed_file(audio_file.filename):
-        filename = secure_filename(audio_file.filename)
-        
+        original_filename = secure_filename(audio_file.filename)
+        # Extract the base name (without extension) and append "transcript"
+        base_filename = os.path.splitext(original_filename)[0]
+        transcript_filename = f"{base_filename}_transcript.txt"
+
         # Create a unique or specific directory for audio files if doesn't exist
-        audio_file_path = os.path.join(current_app.root_path, 'transcription/files/audio', filename)
+        audio_file_path = os.path.join(current_app.root_path, 'transcription/files/audio', original_filename)
         os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
 
         # Save the uploaded file
         audio_file.save(audio_file_path)
 
         # Convert to MP3 if necessary
-        if not filename.endswith('.mp3'):
-            audio_file_path = convert_to_mp3(audio_file_path, filename)
+        if not original_filename.endswith('.mp3'):
+            audio_file_path = convert_to_mp3(audio_file_path, original_filename)
             if audio_file_path is None:
                 return jsonify({"error": "Failed to convert file to MP3"}), 400
 
         speaker_results = speaker_diarization(audio_file_path)
         transcription_details = perform_asr(audio_file_path, prompt)
         full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
-        transcript_file = display_transcript(full_transcript)
+        
+        # Save the transcript using the new filename
+        transcript_file_path = os.path.join(current_app.root_path, 'transcription/files/transcripts', transcript_filename)
+        with open(transcript_file_path, 'w') as file:
+            for segment in full_transcript:
+                file.write(f"[Speaker {segment['speaker_ids'][0]}] ({segment['start_time']} - {segment['end_time']}):\n")
+                file.write(segment['text'] + "\n\n")
 
         try:
             os.remove(audio_file_path)
         except OSError as e:
             print(f"Error: {audio_file_path} : {e.strerror}")
 
-        return jsonify({"message": transcript_file, "summaries": speaker_summaries}), 200
+        return jsonify({"message": transcript_filename, "summaries": speaker_summaries}), 200
     else:
         return jsonify({"error": "File type not allowed"}), 400
+
+
 
 def process_transcript_file(file_path):
     # Create a dictionary to store the dialogues
@@ -291,8 +327,8 @@ def process_transcript_file(file_path):
     
     # Truncate the dialogue to 200 characters at the nearest word and add "..."
     for speaker, text in speaker_dialogues.items():
-        if len(text) > 200:
-            truncated_text = text[:200].rsplit(' ', 1)[0] + '...'
+        if len(text) > 300:
+            truncated_text = text[:300].rsplit(' ', 1)[0] + '...'
             speaker_dialogues[speaker] = truncated_text
         else:
             speaker_dialogues[speaker] = text.strip()
@@ -317,24 +353,17 @@ def finalize_transcript():
     try:
         with open(file_path, "r+") as file:
             transcript_data = file.read()
+            
             for placeholder, actual_name in speaker_names.items():
-                transcript_data = transcript_data.replace(placeholder, actual_name)
+                # Ensure the placeholder format matches the exact text in the transcript
+                transcript_data = transcript_data.replace(f"[{placeholder}]", f"[{actual_name}]")
             
             file.seek(0)
             file.write(transcript_data)
-            file.truncate()  # Truncate file to new size if it got shorter
-  
+            file.truncate()
+
     except Exception as e:
         return jsonify({"error": "Error updating transcript", "details": str(e)}), 500
   
     # Return the updated file
     return send_from_directory(directory=directory, path=filename, as_attachment=True)
-
-@transcript_bp.route("/ping", methods=['GET'])
-def ping():
-    try:
-        response = requests.get("https://ltcocopah.com/ping")
-        return Response(response.content, status=response.status_code, content_type=response.headers['Content-Type'])
-    except requests.exceptions.RequestException as e:
-        # Handle any exceptions that occur during the request
-        return Response(str(e), status=500)
