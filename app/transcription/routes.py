@@ -180,12 +180,13 @@ def combine_speaker_and_transcription(speaker_results, transcription_details):
 
     return combined_transcript, speaker_summaries
 
-def display_transcript(transcript_data):
-    # Generate a filename with the current timestamp
-    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"final_transcript_{timestamp_str}.txt"
+def display_transcript(transcript_data, base_filename):
+    # Generate the output filename based on the input audio file
+    transcript_filename = f"{base_filename}_transcript.txt"
     
-    with open(f'{current_app.root_path}/transcription/files/transcripts/{filename}', 'w') as file:
+    transcript_file_path = os.path.join(current_app.root_path, 'transcription/files/transcripts', transcript_filename)
+    
+    with open(transcript_file_path, 'w') as file:
         # Initialize previous speaker and start time for combining segments
         previous_speaker_ids = None
         segment_start_time = None
@@ -196,7 +197,7 @@ def display_transcript(transcript_data):
                 
             def format_time(seconds):
                 minutes = int(seconds) // 60
-                seconds = round(seconds % 60)
+                seconds = int(seconds % 60)  # Convert to integer and remove decimals
                 return f"{minutes}:{seconds:02d}"  # format seconds as two digits
             
             formatted_start = format_time(float(start_time))
@@ -210,7 +211,6 @@ def display_transcript(transcript_data):
             file.write("\n")
 
         for segment in transcript_data:
-
             # If the segment has the same speaker(s), combine the texts
             if segment['speaker_ids'] == previous_speaker_ids:
                 segment_texts.append(segment['text'])
@@ -230,7 +230,7 @@ def display_transcript(transcript_data):
         if previous_speaker_ids is not None:
             write_segment(file, previous_speaker_ids, segment_start_time, end_time, segment_texts)
 
-    return filename
+    return transcript_filename
 
 def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'mp3', 'wav', 'mp4', 'm4a', 'aac', 'ogg'}
@@ -262,7 +262,6 @@ def init_transcription():
         original_filename = secure_filename(audio_file.filename)
         # Extract the base name (without extension) and append "transcript"
         base_filename = os.path.splitext(original_filename)[0]
-        transcript_filename = f"{base_filename}_transcript.txt"
 
         # Create a unique or specific directory for audio files if doesn't exist
         audio_file_path = os.path.join(current_app.root_path, 'transcription/files/audio', original_filename)
@@ -281,12 +280,8 @@ def init_transcription():
         transcription_details = perform_asr(audio_file_path, prompt)
         full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
         
-        # Save the transcript using the new filename
-        transcript_file_path = os.path.join(current_app.root_path, 'transcription/files/transcripts', transcript_filename)
-        with open(transcript_file_path, 'w') as file:
-            for segment in full_transcript:
-                file.write(f"[Speaker {segment['speaker_ids'][0]}] ({segment['start_time']} - {segment['end_time']}):\n")
-                file.write(segment['text'] + "\n\n")
+        # Call the display_transcript function to format and save the transcript
+        transcript_filename = display_transcript(full_transcript, base_filename)
 
         try:
             os.remove(audio_file_path)
