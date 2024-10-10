@@ -7,6 +7,7 @@ from datetime import datetime
 from collections import defaultdict
 from openai import OpenAI
 from pydub import AudioSegment
+import subprocess
 
 transcript_bp = Blueprint("transcript_bp", __name__)
 
@@ -241,8 +242,14 @@ def convert_to_mp3(audio_file_path, filename):
         audio = AudioSegment.from_file(audio_file_path)
         mp3_filename = f"{os.path.splitext(filename)[0]}.mp3"
         mp3_file_path = os.path.join(os.path.dirname(audio_file_path), mp3_filename)
+        
+        # Perform conversion and log output
         audio.export(mp3_file_path, format="mp3")
         return mp3_file_path
+    except subprocess.CalledProcessError as e:
+        print(f"ffmpeg error output: {e.output.decode('utf-8')}")
+        print(f"Error converting {filename} to MP3: {e}")
+        return None
     except Exception as e:
         print(f"Error converting {filename} to MP3: {e}")
         return None
