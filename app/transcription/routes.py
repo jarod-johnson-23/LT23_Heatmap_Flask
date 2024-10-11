@@ -237,19 +237,25 @@ def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'mp3', 'wav', 'mp4', 'm4a', 'aac', 'ogg'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def convert_to_mp3(audio_file_path, filename):
+def convert_to_mp3(file_path, filename):
     try:
-        audio = AudioSegment.from_file(audio_file_path)
-        mp3_filename = f"{os.path.splitext(filename)[0]}.mp3"
-        mp3_file_path = os.path.join(os.path.dirname(audio_file_path), mp3_filename)
+        # Determine the input format
+        file_extension = os.path.splitext(filename)[1].lower()
         
-        # Perform conversion and log output
+        # Load the file into AudioSegment based on extension
+        if file_extension == '.mp4':
+            audio = AudioSegment.from_file(file_path, format='mp4')
+        else:
+            audio = AudioSegment.from_file(file_path)
+        
+        # Create an MP3 filename
+        mp3_filename = f"{os.path.splitext(filename)[0]}.mp3"
+        mp3_file_path = os.path.join(os.path.dirname(file_path), mp3_filename)
+
+        # Export as MP3
         audio.export(mp3_file_path, format="mp3")
         return mp3_file_path
-    except subprocess.CalledProcessError as e:
-        print(f"ffmpeg error output: {e.output.decode('utf-8')}")
-        print(f"Error converting {filename} to MP3: {e}")
-        return None
+
     except Exception as e:
         print(f"Error converting {filename} to MP3: {e}")
         return None
