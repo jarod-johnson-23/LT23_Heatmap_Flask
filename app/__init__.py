@@ -38,6 +38,7 @@ from .subdomain.routes import routes, subdomain_bp
 from .transcription.routes import routes, transcript_bp
 from .targetprocess.routes import routes, targetprocess_bp
 from .assistants.routes import routes, assistants_bp, setup_socketio
+from .audiobot.routes import routes, audiobot_bp
 
 socketio = SocketIO()
 
@@ -47,7 +48,7 @@ def create_app():
 
     CORS(
         app,
-        resources={r"/*": {"origins": os.getenv("base_url_react")}},
+        resources={r"/*": {"origins": "http://127.0.0.1:3001"}},
         supports_credentials=True,
     )
 
@@ -84,6 +85,7 @@ def create_app():
     app.register_blueprint(transcript_bp, url_prefix="/transcription")
     app.register_blueprint(targetprocess_bp, url_prefix="/targetprocess")
     app.register_blueprint(assistants_bp, url_prefix="/assistants")
+    app.register_blueprint(audiobot_bp, url_prefix="/audiobot")
 
     # Configure Flask-PyMongo
     mongo_uri = os.getenv("mongo_uri")
