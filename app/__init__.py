@@ -48,7 +48,7 @@ def create_app():
 
     CORS(
         app,
-        resources={r"/*": {"origins": "http://127.0.0.1:3001"}},
+        resources={r"/*": {"origins": f"{os.getenv("base_url_react")}"}},
         supports_credentials=True,
     )
 
