@@ -2,7 +2,8 @@ from flask import Blueprint, current_app, request, jsonify
 from functools import wraps
 import os
 import io
-from datetime import datetime
+import re
+from datetime import datetime, timezone, timedelta
 import pytz
 import requests
 from bs4 import BeautifulSoup
@@ -25,11 +26,23 @@ from PIL import Image
 from pdf2image import convert_from_path
 from docx import Document
 import pytesseract
+import boto3
+from botocore.exceptions import ClientError
 
 
 targetprocess_bp = Blueprint("targetprocess_bp", __name__)
 
+# AWS SES Configuration
+AWS_REGION = "us-east-2"
+AWS_ACCESS_KEY = os.getenv("aws_access_key_id")
+AWS_SECRET_KEY = os.getenv("aws_secret_access_key")
+EMAIL_SOURCE = "no-reply@laneterraleverapi.org"  # Must be a verified SES sender email
+EMAIL_RECIPIENT = "devteam@laneterralever.com"
+EMAIL_SUBJECT = "Recent DEV-C TP Comments (Last 24 Hours)"
+
 TARGETPROCESS_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_URL = "https://laneterralever.tpondemand.com/api/v2"
+ACCESS_TOKEN = os.getenv("TP_API_KEY")
 
 # Define the scope and credentials file
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive.readonly"]
@@ -54,6 +67,175 @@ def api_key_required(f):
             return jsonify({'message': 'Unauthorized'}), 401
         return f(*args, **kwargs)
     return decorated_function
+
+def fetch_stories_with_recent_comments():
+    api_url = (
+        f"{BASE_URL}/UserStory?"
+        "where=comments.where(owner.id==384 and createDate>Today.AddDays(-1)).count()>0"
+        "&select={id,name,comments:comments.where(owner.id==384 and createDate>Today.AddDays(-1)).select({id,createDate,description})}"
+        f"&access_token={ACCESS_TOKEN}"
+    )
+
+    response = requests.get(api_url, headers={"Content-Type": "application/json"})
+
+    if response.status_code == 200:
+        data = response.json()
+        return data.get("items", [])  # Extract the relevant stories
+    else:
+        print(f"Error fetching data: {response.status_code} - {response.text}")
+        return []
+
+# Function to generate the email HTML
+def generate_email_html():
+    stories = fetch_stories_with_recent_comments()
+
+    if not stories:
+        return "<p>No recent comment from DEV-C</p>"
+
+    email_html = """
+    <html>
+    <head>
+        <style>
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            th, td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+            tr:nth-child(even) {
+                background-color: #f9f9f9;
+            }
+            a {
+                text-decoration: none;
+                color: #007BFF;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
+            img {
+                max-width: 250px;
+                height: auto;
+            }
+        </style>
+    </head>
+    <body>
+        <h2>Recent DEV-C Comments (Last 24 Hours)</h2>
+        <table>
+            <tr>
+                <th>Story ID</th>
+                <th>Story Name</th>
+                <th>Comment Time</th>
+                <th>Comment</th>
+            </tr>
+    """
+
+    for story in stories:
+        story_id = story["id"]
+        story_name = story["name"]
+        story_link = f"https://laneterralever.tpondemand.com/RestUI/Board.aspx#page=profile&searchPopup=userstory/{story_id}"
+
+        for comment in story.get("comments", []):
+            comment_time = parse_tp_date(comment["createDate"])  # Convert the date
+            cleaned_comment = clean_comment_text(comment["description"])
+
+            email_html += f"""
+            <tr>
+                <td><a href="{story_link}" target="_blank">{story_id}</a></td>
+                <td>{story_name}</td>
+                <td>{comment_time}</td>
+                <td>{cleaned_comment}</td>
+            </tr>
+            """
+
+    email_html += """
+        </table>
+    </body>
+    </html>
+    """
+    return email_html
+
+# Function to clean up comment text (strip unnecessary spaces, newlines, etc.)
+def clean_comment_text(text):
+    return text.strip().replace("\n", " ").replace("\r", "")
+
+# Function to format comment timestamp (assuming it's in ISO 8601 format)
+def format_comment_time(timestamp):
+    try:
+        dt = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return timestamp  # Return as-is if parsing fails
+    
+
+# Function to parse Targetprocess date format (/Date(1738252718000-0600)/)
+def parse_tp_date(tp_date):
+    match = re.search(r"/Date\((\d+)([+-]\d{4})\)/", tp_date)
+    if match:
+        timestamp_ms = int(match.group(1))  # Extract milliseconds
+        utc_offset = match.group(2)  # Extract timezone offset
+
+        # Convert milliseconds to seconds
+        timestamp_s = timestamp_ms / 1000.0
+        dt = datetime.fromtimestamp(timestamp_s, tz=timezone.utc)
+
+        # Apply timezone offset if present
+        if utc_offset:
+            offset_hours = int(utc_offset[:3])  # Extract '+/-HH' part
+            dt += timedelta(hours=offset_hours)
+
+        return dt.strftime("%Y-%m-%d %H:%M:%S")  # Format as readable datetime
+
+    return tp_date  # Return original if parsing fails
+
+# Function to send email using AWS SES
+def send_email():
+    email_body = generate_email_html()
+
+    client = boto3.client(
+        "ses",
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_KEY,
+    )
+
+    try:
+        response = client.send_email(
+            Destination={
+                "ToAddresses": [EMAIL_RECIPIENT],
+            },
+            Message={
+                "Body": {
+                    "Html": {
+                        "Charset": "UTF-8",
+                        "Data": email_body,
+                    },
+                },
+                "Subject": {
+                    "Charset": "UTF-8",
+                    "Data": EMAIL_SUBJECT,
+                },
+            },
+            Source=EMAIL_SOURCE,
+        )
+        print(f"Email sent! Message ID: {response['MessageId']}")
+        return True
+    except ClientError as e:
+        print(f"Email sending failed: {e.response['Error']['Message']}")
+        return False
+
+@targetprocess_bp.route('/jake-email', methods=['GET'])
+def jake_email():
+    if send_email():
+        return jsonify({"message": "Email sent successfully"}), 200
+    else:
+        return jsonify({"error": "Failed to send email"}), 500
 
 
 def clean_html(raw_html):
