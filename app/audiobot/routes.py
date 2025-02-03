@@ -107,13 +107,13 @@ def create_session():
         "tools": [{
             "type": "function",
             "name": "search_files",
-            "description": "Input a search string to do a cosine similarity search against a set of files. It will return the 8 closest matches.",
+            "description": "This is a search function that the Thermo King service support agent uses to search a knowledgebase of service manuals and technical briefings. This function accepts a search string that best represents the information the service agent needs to help the service technician.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "search_term": {
                         "type": "string",
-                        "description": "The string used to search across all the files using cosine similarity search",
+                        "description": "The string that is used to perform the search across service manuals and briefings.",
                     }
                 },
                 "required": ["search_term"]
