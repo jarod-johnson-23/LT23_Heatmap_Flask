@@ -80,11 +80,10 @@ def speaker_diarization(file_path):
 MAX_FILE_SIZE = 26214400  # 26 MB in bytes
 
 def perform_asr(file_path, prompt=""):
-    # Check the file size
-    file_size = os.path.getsize(file_path)
+    original_file_size = os.path.getsize(file_path)
     
-    # If the file is small enough, process it in one go.
-    if file_size <= MAX_FILE_SIZE:
+    # If the original file is within the limit, process it directly.
+    if original_file_size <= MAX_FILE_SIZE:
         with open(file_path, "rb") as audio_file:
             response = client.audio.transcriptions.create(
                 file=audio_file,
@@ -102,35 +101,46 @@ def perform_asr(file_path, prompt=""):
             for segment in response.segments
         ]
     
-    # Otherwise, load the audio using pydub to split it.
+    # Otherwise, split the audio file into chunks.
+    # Load the audio file using pydub.
     audio = AudioSegment.from_file(file_path)
-    duration_ms = len(audio)  # duration in milliseconds
+    duration_ms = len(audio)
     
-    # Determine a safe chunk duration.
-    # One way is to calculate the average bytes per millisecond in the file,
-    # then find how many milliseconds we can have before hitting MAX_FILE_SIZE.
-    bytes_per_ms = file_size / duration_ms
-    chunk_duration_ms = int(MAX_FILE_SIZE / bytes_per_ms)
-    
-    # (Optional) You might want to use a fixed maximum duration if you know your files
-    # are encoded at similar bitrates. For example:
-    # chunk_duration_ms = min(chunk_duration_ms, 60000)  # maximum 60 seconds per chunk
-    
+    # Determine the properties of the audio.
+    # When exporting to WAV, the file size is roughly:
+    #   bytes_per_second = frame_rate * channels * sample_width
+    # So the maximum allowed duration in seconds is:
+    frame_rate = audio.frame_rate
+    channels = audio.channels
+    sample_width = audio.sample_width  # in bytes
+    bytes_per_second = frame_rate * channels * sample_width
+
+    # Use a safety margin (e.g. 95% of the max size) to account for any overhead.
+    max_duration_seconds = 0.95 * (MAX_FILE_SIZE / bytes_per_second)
+    chunk_duration_ms = int(max_duration_seconds * 1000)
+    if chunk_duration_ms <= 0:
+        raise ValueError("Calculated chunk duration is too small. Check file properties.")
+
     transcription_details = []
     
-    # Process each chunk individually.
+    # Process each chunk.
     for chunk_start in range(0, duration_ms, chunk_duration_ms):
-        # Define the chunk boundaries
         chunk_end = min(chunk_start + chunk_duration_ms, duration_ms)
         audio_chunk = audio[chunk_start:chunk_end]
         
-        # Export the chunk to a temporary file
+        # Export the chunk to a temporary WAV file.
         with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_filename = tmp.name
-            # Export as WAV (or use the format that your API expects)
             audio_chunk.export(tmp_filename, format="wav")
         
-        # Call the transcription API for the chunk.
+        # Verify that the exported chunk is below the size limit.
+        chunk_file_size = os.path.getsize(tmp_filename)
+        if chunk_file_size > MAX_FILE_SIZE:
+            os.remove(tmp_filename)
+            raise ValueError(f"Exported chunk file size ({chunk_file_size} bytes) exceeds MAX_FILE_SIZE. "
+                             "Try reducing the chunk duration or using a different format.")
+        
+        # Call the transcription API on the chunk.
         with open(tmp_filename, "rb") as chunk_file:
             response = client.audio.transcriptions.create(
                 file=chunk_file,
@@ -139,10 +149,9 @@ def perform_asr(file_path, prompt=""):
                 timestamp_granularities=["segment"],
                 language="en",
             )
-        # Clean up the temporary file.
         os.remove(tmp_filename)
         
-        # Adjust segment times by adding the chunk's offset (converted from ms to seconds)
+        # Adjust the segment timestamps by adding the offset for this chunk.
         offset_sec = chunk_start / 1000.0
         for segment in response.segments:
             transcription_details.append({
@@ -151,7 +160,6 @@ def perform_asr(file_path, prompt=""):
                 'text': segment['text']
             })
     
-    # Return the combined transcription details in the same formatting.
     return transcription_details
 
 
