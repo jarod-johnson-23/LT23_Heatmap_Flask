@@ -7,6 +7,7 @@ from datetime import datetime
 from collections import defaultdict
 from openai import OpenAI
 from pydub import AudioSegment
+from tempfile import NamedTemporaryFile
 import subprocess
 
 transcript_bp = Blueprint("transcript_bp", __name__)
@@ -76,34 +77,81 @@ def speaker_diarization(file_path):
   else:
       print(f"Error: API request failed with status code {response.status_code}")
 
+MAX_FILE_SIZE = 26214400  # 26 MB in bytes
+
 def perform_asr(file_path, prompt=""):
-    audio_file = open(file_path, "rb")
-    response = client.audio.transcriptions.create(
-        file=audio_file,
-        model="whisper-1",
-        response_format="verbose_json",
-        timestamp_granularities=["segment"],
-        language="en",
-    )
-
-    speaker_segments = response.segments
-
-    # Initialize a list to hold transcription details
+    # Check the file size
+    file_size = os.path.getsize(file_path)
+    
+    # If the file is small enough, process it in one go.
+    if file_size <= MAX_FILE_SIZE:
+        with open(file_path, "rb") as audio_file:
+            response = client.audio.transcriptions.create(
+                file=audio_file,
+                model="whisper-1",
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+                language="en",
+            )
+        return [
+            {
+                'start_time': segment['start'],
+                'end_time': segment['end'],
+                'text': segment['text']
+            }
+            for segment in response.segments
+        ]
+    
+    # Otherwise, load the audio using pydub to split it.
+    audio = AudioSegment.from_file(file_path)
+    duration_ms = len(audio)  # duration in milliseconds
+    
+    # Determine a safe chunk duration.
+    # One way is to calculate the average bytes per millisecond in the file,
+    # then find how many milliseconds we can have before hitting MAX_FILE_SIZE.
+    bytes_per_ms = file_size / duration_ms
+    chunk_duration_ms = int(MAX_FILE_SIZE / bytes_per_ms)
+    
+    # (Optional) You might want to use a fixed maximum duration if you know your files
+    # are encoded at similar bitrates. For example:
+    # chunk_duration_ms = min(chunk_duration_ms, 60000)  # maximum 60 seconds per chunk
+    
     transcription_details = []
-
-    # The result contains a 'segments' key with the transcription and timestamps for each segment
-    for segment in speaker_segments:
-        start_time = segment['start']
-        end_time = segment['end']
-        text = segment['text']
-
-        # Append transcription details to the list
-        transcription_details.append({
-            'start_time': start_time,
-            'end_time': end_time,
-            'text': text
-        })
-
+    
+    # Process each chunk individually.
+    for chunk_start in range(0, duration_ms, chunk_duration_ms):
+        # Define the chunk boundaries
+        chunk_end = min(chunk_start + chunk_duration_ms, duration_ms)
+        audio_chunk = audio[chunk_start:chunk_end]
+        
+        # Export the chunk to a temporary file
+        with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_filename = tmp.name
+            # Export as WAV (or use the format that your API expects)
+            audio_chunk.export(tmp_filename, format="wav")
+        
+        # Call the transcription API for the chunk.
+        with open(tmp_filename, "rb") as chunk_file:
+            response = client.audio.transcriptions.create(
+                file=chunk_file,
+                model="whisper-1",
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+                language="en",
+            )
+        # Clean up the temporary file.
+        os.remove(tmp_filename)
+        
+        # Adjust segment times by adding the chunk's offset (converted from ms to seconds)
+        offset_sec = chunk_start / 1000.0
+        for segment in response.segments:
+            transcription_details.append({
+                'start_time': segment['start'] + offset_sec,
+                'end_time': segment['end'] + offset_sec,
+                'text': segment['text']
+            })
+    
+    # Return the combined transcription details in the same formatting.
     return transcription_details
 
 

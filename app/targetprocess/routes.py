@@ -26,8 +26,7 @@ from PIL import Image
 from pdf2image import convert_from_path
 from docx import Document
 import pytesseract
-import boto3
-from botocore.exceptions import ClientError
+import html
 
 
 targetprocess_bp = Blueprint("targetprocess_bp", __name__)
@@ -77,7 +76,6 @@ def fetch_stories_with_recent_comments():
     )
 
     response = requests.get(api_url, headers={"Content-Type": "application/json"})
-
     if response.status_code == 200:
         data = response.json()
         return data.get("items", [])  # Extract the relevant stories
@@ -85,157 +83,107 @@ def fetch_stories_with_recent_comments():
         print(f"Error fetching data: {response.status_code} - {response.text}")
         return []
 
-# Function to generate the email HTML
-def generate_email_html():
-    stories = fetch_stories_with_recent_comments()
-
-    if not stories:
-        return "<p>No recent comment from DEV-C</p>"
-
-    email_html = """
-    <html>
-    <head>
-        <style>
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
-            }
-            th, td {
-                border: 1px solid #ddd;
-                padding: 8px;
-                text-align: left;
-            }
-            th {
-                background-color: #f2f2f2;
-            }
-            tr:nth-child(even) {
-                background-color: #f9f9f9;
-            }
-            a {
-                text-decoration: none;
-                color: #007BFF;
-            }
-            a:hover {
-                text-decoration: underline;
-            }
-            img {
-                max-width: 250px;
-                height: auto;
-            }
-        </style>
-    </head>
-    <body>
-        <h2>Recent DEV-C Comments (Last 24 Hours)</h2>
-        <table>
-            <tr>
-                <th>Story ID</th>
-                <th>Story Name</th>
-                <th>Comment Time</th>
-                <th>Comment</th>
-            </tr>
-    """
-
-    for story in stories:
-        story_id = story["id"]
-        story_name = story["name"]
-        story_link = f"https://laneterralever.tpondemand.com/RestUI/Board.aspx#page=profile&searchPopup=userstory/{story_id}"
-
-        for comment in story.get("comments", []):
-            comment_time = parse_tp_date(comment["createDate"])  # Convert the date
-            cleaned_comment = clean_comment_text(comment["description"])
-
-            email_html += f"""
-            <tr>
-                <td><a href="{story_link}" target="_blank">{story_id}</a></td>
-                <td>{story_name}</td>
-                <td>{comment_time}</td>
-                <td>{cleaned_comment}</td>
-            </tr>
-            """
-
-    email_html += """
-        </table>
-    </body>
-    </html>
-    """
-    return email_html
-
-# Function to clean up comment text (strip unnecessary spaces, newlines, etc.)
+# ------------------------------------------------------------------------------
+# Utility functions for cleaning comment text and parsing dates
+# ------------------------------------------------------------------------------
 def clean_comment_text(text):
     return text.strip().replace("\n", " ").replace("\r", "")
 
-# Function to format comment timestamp (assuming it's in ISO 8601 format)
-def format_comment_time(timestamp):
-    try:
-        dt = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return timestamp  # Return as-is if parsing fails
-    
-
-# Function to parse Targetprocess date format (/Date(1738252718000-0600)/)
 def parse_tp_date(tp_date):
+    """
+    Converts a Targetprocess date string of the form /Date(1738252718000-0600)/
+    into an ISO 8601 string with a Z suffix. (You may adjust this as needed.)
+    """
     match = re.search(r"/Date\((\d+)([+-]\d{4})\)/", tp_date)
     if match:
-        timestamp_ms = int(match.group(1))  # Extract milliseconds
-        utc_offset = match.group(2)  # Extract timezone offset
-
-        # Convert milliseconds to seconds
+        timestamp_ms = int(match.group(1))
+        utc_offset = match.group(2)
         timestamp_s = timestamp_ms / 1000.0
         dt = datetime.fromtimestamp(timestamp_s, tz=timezone.utc)
-
-        # Apply timezone offset if present
         if utc_offset:
-            offset_hours = int(utc_offset[:3])  # Extract '+/-HH' part
+            # Adjust by the timezone offset (if desired)
+            offset_hours = int(utc_offset[:3])
             dt += timedelta(hours=offset_hours)
+        # Return a non-ambiguous ISO 8601 formatted string (with milliseconds and Z)
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return tp_date  # Return as-is if parsing fails
 
-        return dt.strftime("%Y-%m-%d %H:%M:%S")  # Format as readable datetime
 
-    return tp_date  # Return original if parsing fails
 
-# Function to send email using AWS SES
-def send_email():
-    email_body = generate_email_html()
+def clean_comment_text(text, remove_tags=True):
+    # First, decode HTML entities (e.g., &#64; becomes @)
+    text = html.unescape(text)
+    
+    if remove_tags:
+        # Remove HTML tags using BeautifulSoup
+        soup = BeautifulSoup(text, "html.parser")
+        text = soup.get_text()
+    
+    # Clean up whitespace and newlines
+    return text.strip().replace("\n", " ").replace("\r", "")
 
-    client = boto3.client(
-        "ses",
-        region_name=AWS_REGION,
-        aws_access_key_id=AWS_ACCESS_KEY,
-        aws_secret_access_key=AWS_SECRET_KEY,
-    )
+# ------------------------------------------------------------------------------
+# New function to insert comment data into the Airtable Comments table
+# ------------------------------------------------------------------------------
+def insert_comments_into_airtable():
+    stories = fetch_stories_with_recent_comments()
+    if not stories:
+        print("No recent comments to insert into Airtable")
+        return True  # Nothing to insert is not necessarily an error
 
-    try:
-        response = client.send_email(
-            Destination={
-                "ToAddresses": [EMAIL_RECIPIENT],
-            },
-            Message={
-                "Body": {
-                    "Html": {
-                        "Charset": "UTF-8",
-                        "Data": email_body,
-                    },
-                },
-                "Subject": {
-                    "Charset": "UTF-8",
-                    "Data": EMAIL_SUBJECT,
-                },
-            },
-            Source=EMAIL_SOURCE,
-        )
-        print(f"Email sent! Message ID: {response['MessageId']}")
-        return True
-    except ClientError as e:
-        print(f"Email sending failed: {e.response['Error']['Message']}")
-        return False
+    records = []
+    for story in stories:
+        story_id = story.get("id")
+        story_name = story.get("name")
+        # Ensure story_id is a string if your Airtable field expects text.
+        story_id_str = str(story_id) if story_id is not None else ""
+        
+        # Each comment in the story will be inserted as a separate record
+        for comment in story.get("comments", []):
+            comment_time = parse_tp_date(comment.get("createDate"))
+            # Clean the comment content:
+            comment_text = clean_comment_text(comment.get("description"), remove_tags=True)
+            record = {
+                "fields": {
+                    "Story ID": story_id_str,
+                    "Story Name": story_name,
+                    "Comment time": comment_time,
+                    "Comment": comment_text
+                }
+            }
+            records.append(record)
 
-@targetprocess_bp.route('/jake-email', methods=['GET'])
-def jake_email():
-    if send_email():
-        return jsonify({"message": "Email sent successfully"}), 200
+    # Airtable API endpoint for your Comments table
+    airtable_api_url = "https://api.airtable.com/v0/appVKUAQ6alU3EWrK/Comments"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('AIRTABLE_API_KEY')}",
+        "Content-Type": "application/json"
+    }
+
+    # Airtable API supports creating up to 10 records per request.
+    chunk_size = 10
+    success = True
+    for i in range(0, len(records), chunk_size):
+        chunk = records[i:i+chunk_size]
+        data = {"records": chunk}
+        response = requests.post(airtable_api_url, headers=headers, json=data, params={"typecast": "true"})
+        if response.status_code == 200:
+            print("Records inserted successfully:", response.json())
+        else:
+            print(f"Error inserting records into Airtable: {response.status_code} - {response.text}")
+            success = False
+
+    return success
+
+# ------------------------------------------------------------------------------
+# Flask route to call the Airtable insertion instead of sending an email
+# ------------------------------------------------------------------------------
+@targetprocess_bp.route('/insert-comments', methods=['GET'])
+def insert_comments():
+    if insert_comments_into_airtable():
+        return jsonify({"message": "Comments inserted successfully"}), 200
     else:
-        return jsonify({"error": "Failed to send email"}), 500
+        return jsonify({"error": "Failed to insert some comments"}), 500
 
 
 def clean_html(raw_html):
