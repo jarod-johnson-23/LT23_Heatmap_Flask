@@ -39,6 +39,7 @@ from .transcription.routes import routes, transcript_bp
 from .targetprocess.routes import routes, targetprocess_bp
 from .assistants.routes import routes, assistants_bp, setup_socketio
 from .audiobot.routes import routes, audiobot_bp
+from .slackbot.routes import routes, slackbot_bp
 
 socketio = SocketIO()
 
@@ -86,7 +87,7 @@ def create_app():
     app.register_blueprint(targetprocess_bp, url_prefix="/targetprocess")
     app.register_blueprint(assistants_bp, url_prefix="/assistants")
     app.register_blueprint(audiobot_bp, url_prefix="/audiobot")
-
+    app.register_blueprint(slackbot_bp, url_prefix="/slack")
     # Configure Flask-PyMongo
     mongo_uri = os.getenv("mongo_uri")
     client = MongoClient(mongo_uri)
