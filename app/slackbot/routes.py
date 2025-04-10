@@ -9,6 +9,8 @@ from .database import init_db, get_previous_response_id, update_response_id, cle
 
 slackbot_bp = Blueprint("slackbot_bp", __name__)
 
+from . import routes
+
 # Initialize OpenAI client
 client = OpenAI(
     organization=os.getenv("openai_organization"),

@@ -10,3 +10,4 @@ requirements.txt
 /heatmap/result/*.kml
 /heatmap/heatmap/data
 /app/targetprocess/google
+app/slackbot/data/conversations.db

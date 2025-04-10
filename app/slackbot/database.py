@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # Ensure the database directory exists
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DB_DIR = Path(__file__).parent / "data"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DB_DIR / "conversations.db"
