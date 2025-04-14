@@ -33,22 +33,25 @@ slack_client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
 # Initialize the database
 init_db()
 
-# Set up the scheduler for daily reset at 2AM MST
-scheduler = BackgroundScheduler()
+# Set up the scheduler for daily reset at 2AM MST (9AM UTC)
+# Explicitly set timezone to UTC to avoid server timezone issues
+scheduler = BackgroundScheduler(timezone='UTC')
 mst_timezone = pytz.timezone('America/Denver')  # MST timezone
 
 def daily_reset_job():
-    """Reset all conversations daily at 2AM MST."""
+    """Reset all conversations daily at 2AM MST (9AM UTC)."""
     reset_count = reset_all_conversations()
     deleted_count = cleanup_old_processed_messages()
-    print(f"[{datetime.now(mst_timezone)}] Daily reset: Cleared {reset_count} conversation histories and {deleted_count} processed message records")
+    current_time_utc = datetime.now(pytz.UTC)
+    current_time_mst = current_time_utc.astimezone(mst_timezone)
+    print(f"[{current_time_mst}] Daily reset: Cleared {reset_count} conversation histories and {deleted_count} processed message records")
 
-# Schedule the job to run at 2AM MST
+# Schedule the job to run at 9AM UTC (2AM MST)
 scheduler.add_job(
     daily_reset_job,
-    trigger=CronTrigger(hour=2, minute=0, timezone=mst_timezone),
+    trigger=CronTrigger(hour=9, minute=0, timezone=pytz.UTC),
     id='daily_reset_job',
-    name='Reset all conversations at 2AM MST',
+    name='Reset all conversations at 9AM UTC (2AM MST)',
     replace_existing=True
 )
 
