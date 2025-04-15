@@ -1,5 +1,6 @@
 from flask import Blueprint, current_app, request, jsonify, send_from_directory
 import os
+import json
 import boto3
 from botocore.exceptions import ClientError
 import re
@@ -10,6 +11,7 @@ from openai import OpenAI
 from datetime import datetime, time
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
 from .database import (
     init_db, get_previous_response_id, update_response_id, reset_all_conversations,
     is_user_authenticated, extract_email, generate_verification_code, 
@@ -20,6 +22,41 @@ from .database import (
 slackbot_bp = Blueprint("slackbot_bp", __name__)
 
 from . import routes
+
+# Define paths for bot configuration files
+BOT_DIR = Path(__file__).parent / "bot"
+INSTRUCTIONS_PATH = BOT_DIR / "instructions.txt"
+TOOLS_PATH = BOT_DIR / "tools.json"
+
+# Create the bot directory if it doesn't exist
+BOT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Create default files if they don't exist
+if not INSTRUCTIONS_PATH.exists():
+    with open(INSTRUCTIONS_PATH, 'w') as f:
+        f.write("You are a helpful assistant integrated with Slack.")
+
+if not TOOLS_PATH.exists():
+    with open(TOOLS_PATH, 'w') as f:
+        f.write("[]")
+
+def load_bot_instructions():
+    """Load the bot instructions from the text file."""
+    try:
+        with open(INSTRUCTIONS_PATH, 'r') as f:
+            return f.read().strip()
+    except Exception as e:
+        print(f"Error loading bot instructions: {e}")
+        return "You are a helpful assistant integrated with Slack."
+
+def load_bot_tools():
+    """Load the bot tools from the JSON file."""
+    try:
+        with open(TOOLS_PATH, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading bot tools: {e}")
+        return []
 
 # Initialize OpenAI client
 client = OpenAI(
@@ -109,6 +146,26 @@ def send_verification_email(email, code):
         print(f"An error occurred: {e.response['Error']['Message']}")
         return False
 
+# Add this function to handle tool calls
+def handle_tool_call(name, args, user_email):
+    """Handle tool calls from the OpenAI API."""
+    print(f"Handling tool call: {name} with args: {args}")
+    
+    if name == "get_current_user_info":
+        # Return mock user info for now
+        return {
+            "email": user_email,
+            "name": user_email.split('@')[0],
+            "role": "Employee",
+            "department": "Marketing",
+            "tp_id": "12345"
+        }
+    
+    # Add more function handlers here as needed
+    
+    # If no handler is found
+    return {"error": f"Function {name} not implemented"}
+
 @slackbot_bp.route("/events", methods=["POST"])
 def slack_events():
     data = request.json
@@ -148,26 +205,108 @@ def slack_events():
                     # Get the previous response ID for this channel
                     previous_response_id = get_previous_response_id(channel_id)
                     
-                    # Get response from OpenAI
+                    # Load bot instructions and tools
+                    instructions = load_bot_instructions()
+                    tools = load_bot_tools()
+                    
+                    # Personalize instructions with user info
+                    personalized_instructions = f"{instructions}\n\nYou are chatting with {user_email}."
+                    
+                    # Initialize input messages with the user's message
+                    input_messages = [
+                        {"role": "user", "content": text}
+                    ]
+                    
+                    # Process the conversation with potential function calls
                     try:
-                        response = client.responses.create(
-                            model="gpt-4o-mini",
-                            instructions=f"You are a helpful assistant integrated with Slack. You are chatting with {user_email}.",
-                            previous_response_id=previous_response_id,
-                            input=[
-                                {"role": "user", "content": text}
-                            ]
-                        )
+                        # First API call to get initial response or function calls
+                        api_params = {
+                            "model": "gpt-4o-mini",
+                            "instructions": personalized_instructions,
+                            "previous_response_id": previous_response_id,
+                            "input": input_messages
+                        }
+                        
+                        # Add tools if available
+                        if tools:
+                            api_params["tools"] = tools
+                        
+                        # Make the initial API call
+                        response = client.responses.create(**api_params)
+                        
+                        # Check if there are any function calls in the response
+                        has_function_calls = False
+                        for output_item in response.output:
+                            if hasattr(output_item, 'type') and output_item.type == "function_call":
+                                has_function_calls = True
+                                break
+                        
+                        # If there are function calls, process them
+                        if has_function_calls:
+                            # Send a typing indicator to Slack
+                            try:
+                                slack_client.chat_postEphemeral(
+                                    channel=channel_id,
+                                    user=user_id,
+                                    text="I'm processing your request..."
+                                )
+                            except Exception as e:
+                                print(f"Error sending typing indicator: {e}")
+                            
+                            # Process each function call
+                            function_call_messages = []
+                            for output_item in response.output:
+                                if hasattr(output_item, 'type') and output_item.type == "function_call":
+                                    # Extract function call details
+                                    function_name = output_item.name
+                                    function_args = json.loads(output_item.arguments)
+                                    call_id = output_item.call_id
+                                    
+                                    # Execute the function
+                                    function_result = handle_tool_call(function_name, function_args, user_email)
+                                    
+                                    # Add the function result to function call messages
+                                    function_call_messages.append({
+                                        "type": "function_call_output",
+                                        "call_id": call_id,
+                                        "output": json.dumps(function_result)
+                                    })
+                            
+                            # Make a second API call with ONLY the function results
+                            # Note: We don't include the original user message again
+                            second_response = client.responses.create(
+                                model="gpt-4o-mini",
+                                instructions=personalized_instructions,
+                                previous_response_id=previous_response_id,
+                                input=function_call_messages,
+                                tools=tools
+                            )
+                            
+                            # Use the second response for the final output
+                            response = second_response
                         
                         # Store the new response ID for future conversations
                         update_response_id(channel_id, response.id)
                         
+                        # Extract the text response
+                        bot_response = ""
+                        for output_item in response.output:
+                            if hasattr(output_item, 'content') and output_item.content:
+                                for content_item in output_item.content:
+                                    if hasattr(content_item, 'text') and content_item.text:
+                                        bot_response += content_item.text
+                        
                         # Send the response back to Slack
-                        bot_response = response.output[0].content[0].text
-                        slack_client.chat_postMessage(
-                            channel=channel_id,
-                            text=bot_response
-                        )
+                        if bot_response:
+                            slack_client.chat_postMessage(
+                                channel=channel_id,
+                                text=bot_response
+                            )
+                        else:
+                            slack_client.chat_postMessage(
+                                channel=channel_id,
+                                text="I'm sorry, I couldn't generate a response. Please try again."
+                            )
                     except Exception as e:
                         print(f"Error: {e}")
                         slack_client.chat_postMessage(
@@ -221,6 +360,50 @@ def slack_events():
                             )
     
     return jsonify({"status": "ok"})
+
+@slackbot_bp.route("/update-instructions", methods=["POST"])
+def update_instructions():
+    """Update the bot instructions."""
+    try:
+        new_instructions = request.json.get("instructions")
+        if not new_instructions:
+            return jsonify({"status": "error", "message": "No instructions provided"}), 400
+        
+        with open(INSTRUCTIONS_PATH, 'w') as f:
+            f.write(new_instructions)
+        
+        return jsonify({"status": "success", "message": "Bot instructions updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@slackbot_bp.route("/update-tools", methods=["POST"])
+def update_tools():
+    """Update the bot tools."""
+    try:
+        new_tools = request.json.get("tools")
+        if new_tools is None:
+            return jsonify({"status": "error", "message": "No tools provided"}), 400
+        
+        with open(TOOLS_PATH, 'w') as f:
+            json.dump(new_tools, f, indent=2)
+        
+        return jsonify({"status": "success", "message": "Bot tools updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@slackbot_bp.route("/get-config", methods=["GET"])
+def get_config():
+    """Get the current bot configuration."""
+    try:
+        instructions = load_bot_instructions()
+        tools = load_bot_tools()
+        
+        return jsonify({
+            "instructions": instructions,
+            "tools": tools
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @slackbot_bp.route("/install", methods=["GET"])
 def slack_install():

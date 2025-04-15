@@ -1,0 +1,11 @@
+[{
+  "type": "function",
+  "name": "get_current_user_info",
+  "description": "Get base TP info about the currently authenticated user",
+  "strict": true,
+  "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+  }
+}]
