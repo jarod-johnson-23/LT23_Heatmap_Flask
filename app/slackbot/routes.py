@@ -173,6 +173,7 @@ def handle_tool_call(name, args, user_email):
         try:
             # Make the API request
             response = requests.get(api_url)
+            print(response)
             
             # Check if the request was successful
             if response.status_code == 200:
@@ -239,6 +240,7 @@ def handle_tool_call(name, args, user_email):
                 
                 # Add source information
                 user_data["source"] = "TargetProcess"
+                print(user_data)
                 
                 return user_data
             else:
