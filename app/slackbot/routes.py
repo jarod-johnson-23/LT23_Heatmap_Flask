@@ -154,8 +154,10 @@ def handle_tool_call(name, args, user_email):
     print(f"Handling tool call: {name} with args: {args}")
     
     if name == "get_current_user_info":
+        print("Getting current user info")
         # Extract username from email (part before @)
         username = user_email.split('@')[0]
+        print(username)
         
         # Get TargetProcess API key from environment variables
         tp_api_key = os.getenv("tp_api_key")
@@ -169,6 +171,7 @@ def handle_tool_call(name, args, user_email):
         
         # Construct the API URL
         api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(email contains '{username}')&access_token={tp_api_key}"
+        print(api_url)
         
         try:
             # Make the API request
