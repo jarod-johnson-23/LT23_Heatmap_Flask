@@ -245,16 +245,6 @@ def slack_events():
                         
                         # If there are function calls, process them
                         if has_function_calls:
-                            # Send a typing indicator to Slack
-                            try:
-                                slack_client.chat_postEphemeral(
-                                    channel=channel_id,
-                                    user=user_id,
-                                    text="I'm processing your request..."
-                                )
-                            except Exception as e:
-                                print(f"Error sending typing indicator: {e}")
-                            
                             # Process each function call
                             function_call_messages = []
                             for output_item in response.output:
@@ -273,6 +263,8 @@ def slack_events():
                                         "call_id": call_id,
                                         "output": json.dumps(function_result)
                                     })
+
+                            print(function_call_messages)
                             
                             # Make a second API call with ONLY the function results
                             # Note: We don't include the original user message again
@@ -283,6 +275,8 @@ def slack_events():
                                 input=function_call_messages,
                                 tools=tools
                             )
+
+                            print(second_response)
                             
                             # Use the second response for the final output
                             response = second_response
