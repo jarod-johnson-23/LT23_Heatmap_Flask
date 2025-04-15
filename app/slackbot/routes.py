@@ -20,6 +20,7 @@ from .database import (
 )
 import requests
 import xml.etree.ElementTree as ET
+from .potenza import execute_sql_query
 
 slackbot_bp = Blueprint("slackbot_bp", __name__)
 
@@ -46,10 +47,17 @@ def load_bot_instructions():
     """Load the bot instructions from the text file."""
     try:
         with open(INSTRUCTIONS_PATH, 'r') as f:
-            return f.read().strip()
+            instructions = f.read().strip()
+            
+            # Add current date information
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            instructions = f"{instructions}\n\nToday's date is {current_date}."
+            
+            return instructions
     except Exception as e:
         print(f"Error loading bot instructions: {e}")
-        return "You are a helpful assistant integrated with Slack."
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        return f"You are a helpful assistant integrated with Slack. Today's date is {current_date}."
 
 def load_bot_tools():
     """Load the bot tools from the JSON file."""
@@ -308,7 +316,7 @@ def slack_events():
                     instructions = load_bot_instructions()
                     tools = load_bot_tools()
                     
-                    # Personalize instructions with user info
+                    # Personalize instructions with user info and current date
                     personalized_instructions = f"{instructions}\n\nYou are chatting with {user_email}."
                     
                     # Initialize input messages with the user's message
@@ -320,7 +328,7 @@ def slack_events():
                     try:
                         # First API call to get initial response or function calls
                         api_params = {
-                            "model": "gpt-4o-mini",
+                            "model": "gpt-4.1",
                             "instructions": personalized_instructions,
                             "previous_response_id": previous_response_id,
                             "input": input_messages
