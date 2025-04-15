@@ -18,6 +18,8 @@ from .database import (
     store_verification_code, verify_code, get_user_email, cleanup_old_processed_messages,
     is_message_processed, mark_message_processed
 )
+import requests
+import xml.etree.ElementTree as ET
 
 slackbot_bp = Blueprint("slackbot_bp", __name__)
 
@@ -152,14 +154,109 @@ def handle_tool_call(name, args, user_email):
     print(f"Handling tool call: {name} with args: {args}")
     
     if name == "get_current_user_info":
-        # Return mock user info for now
-        return {
-            "email": user_email,
-            "name": user_email.split('@')[0],
-            "role": "Employee",
-            "department": "Marketing",
-            "tp_id": "12345"
-        }
+        # Extract username from email (part before @)
+        username = user_email.split('@')[0]
+        
+        # Get TargetProcess API key from environment variables
+        tp_api_key = os.getenv("tp_api_key")
+        
+        if not tp_api_key:
+            return {
+                "error": "TargetProcess API key not found in environment variables",
+                "email": user_email,
+                "message": "Could not retrieve user information from TargetProcess"
+            }
+        
+        # Construct the API URL
+        api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(email contains '{username}')&access_token={tp_api_key}"
+        
+        try:
+            # Make the API request
+            response = requests.get(api_url)
+            
+            # Check if the request was successful
+            if response.status_code == 200:
+                # Parse the XML response
+                root = ET.fromstring(response.content)
+                
+                # Check if any users were found
+                users = root.findall(".//User")
+                if not users:
+                    return {
+                        "error": "User not found in TargetProcess",
+                        "email": user_email,
+                        "message": "No matching user found in TargetProcess"
+                    }
+                
+                # Get the first matching user
+                user = users[0]
+                
+                # Extract basic user information
+                user_data = {
+                    "tp_id": user.get("Id", "Unknown"),
+                    "first_name": user.find("FirstName").text if user.find("FirstName") is not None else "Unknown",
+                    "last_name": user.find("LastName").text if user.find("LastName") is not None else "Unknown",
+                    "email": user.find("Email").text if user.find("Email") is not None else user_email,
+                    "create_date": user.find("CreateDate").text if user.find("CreateDate") is not None else "Unknown",
+                    "last_login_date": user.find("LastLoginDate").text if user.find("LastLoginDate") is not None else "Unknown"
+                }
+                
+                # Extract role information
+                role_element = user.find("Role")
+                if role_element is not None:
+                    user_data["role"] = role_element.get("Name", "Unknown")
+                else:
+                    user_data["role"] = "Unknown"
+                
+                # Extract custom fields
+                custom_fields = user.find("CustomFields")
+                if custom_fields is not None:
+                    fields = custom_fields.findall("Field")
+                    for field in fields:
+                        field_name = field.find("Name").text if field.find("Name") is not None else ""
+                        field_value = field.find("Value").text if field.find("Value") is not None else None
+                        
+                        if field_name == "Manager Name":
+                            user_data["manager_name"] = field_value or "Unknown"
+                        elif field_name == "Mobile Phone":
+                            user_data["mobile_phone"] = field_value or "Unknown"
+                        elif field_name == "Title":
+                            user_data["title"] = field_value or "Unknown"
+                        elif field_name == "Anniversary Date":
+                            user_data["anniversary_date"] = field_value or "Unknown"
+                        elif field_name == "Birthday Month Day":
+                            user_data["birthday"] = field_value or "Unknown"
+                        elif field_name == "Checkin Workstream":
+                            user_data["checkin_workstream"] = field_value or "Unknown"
+                
+                # Add default values for any missing fields
+                user_data.setdefault("manager_name", "Unknown")
+                user_data.setdefault("mobile_phone", "Unknown")
+                user_data.setdefault("title", "Unknown")
+                user_data.setdefault("anniversary_date", "Unknown")
+                user_data.setdefault("birthday", "Unknown")
+                user_data.setdefault("checkin_workstream", "Unknown")
+                
+                # Add source information
+                user_data["source"] = "TargetProcess"
+                
+                return user_data
+            else:
+                # Handle API error
+                return {
+                    "error": f"TargetProcess API returned status code {response.status_code}",
+                    "email": user_email,
+                    "message": "Error retrieving user information from TargetProcess"
+                }
+        
+        except Exception as e:
+            # Handle any exceptions
+            print(f"Error calling TargetProcess API: {str(e)}")
+            return {
+                "error": str(e),
+                "email": user_email,
+                "message": "Error retrieving user information from TargetProcess"
+            }
     
     # Add more function handlers here as needed
     
@@ -233,7 +330,6 @@ def slack_events():
                         
                         # Make the initial API call
                         response = client.responses.create(**api_params)
-                        print(response)
                         
                         # Update the response ID immediately after the first call
                         # This ensures continuity for any subsequent calls
@@ -268,7 +364,6 @@ def slack_events():
                                         "output": json.dumps(function_result)
                                     })
 
-                            print(function_call_messages)
                             
                             # Make a second API call with ONLY the function results
                             # Use the updated previous_response_id from the first call
@@ -279,8 +374,6 @@ def slack_events():
                                 input=function_call_messages,
                                 tools=tools
                             )
-
-                            print(second_response)
                             
                             # Update the response ID again after the second call
                             update_response_id(channel_id, second_response.id)
