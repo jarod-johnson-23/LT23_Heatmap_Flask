@@ -230,9 +230,11 @@ def slack_events():
                         # Add tools if available
                         if tools:
                             api_params["tools"] = tools
+                        print(api_params)
                         
                         # Make the initial API call
                         response = client.responses.create(**api_params)
+                        print(response)
                         
                         # Check if there are any function calls in the response
                         has_function_calls = False
