@@ -230,11 +230,15 @@ def slack_events():
                         # Add tools if available
                         if tools:
                             api_params["tools"] = tools
-                        print(api_params)
                         
                         # Make the initial API call
                         response = client.responses.create(**api_params)
                         print(response)
+                        
+                        # Update the response ID immediately after the first call
+                        # This ensures continuity for any subsequent calls
+                        update_response_id(channel_id, response.id)
+                        previous_response_id = response.id  # Update the local variable too
                         
                         # Check if there are any function calls in the response
                         has_function_calls = False
@@ -267,22 +271,22 @@ def slack_events():
                             print(function_call_messages)
                             
                             # Make a second API call with ONLY the function results
-                            # Note: We don't include the original user message again
+                            # Use the updated previous_response_id from the first call
                             second_response = client.responses.create(
                                 model="gpt-4o-mini",
                                 instructions=personalized_instructions,
-                                previous_response_id=previous_response_id,
+                                previous_response_id=previous_response_id,  # Using updated ID
                                 input=function_call_messages,
                                 tools=tools
                             )
 
                             print(second_response)
                             
+                            # Update the response ID again after the second call
+                            update_response_id(channel_id, second_response.id)
+                            
                             # Use the second response for the final output
                             response = second_response
-                        
-                        # Store the new response ID for future conversations
-                        update_response_id(channel_id, response.id)
                         
                         # Extract the text response
                         bot_response = ""
