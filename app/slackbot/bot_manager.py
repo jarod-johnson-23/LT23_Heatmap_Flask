@@ -301,6 +301,7 @@ class BotManager:
             # Check for function calls from the sub-bot
             function_calls_to_process = []
             for output_item in response.output:
+                print(f"DEBUG: Output item: {output_item}")
                 if hasattr(output_item, 'type') and output_item.type == "function_call":
                     function_calls_to_process.append(output_item)
 
