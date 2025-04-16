@@ -1,25 +1,23 @@
 [
   {
-    "name": "delegate_to_sub_bot",
-    "description": "Delegate a task to a specialized sub-bot that has the tools to handle specific types of requests.",
-    "strict": true,
-    "parameters": {
+    "type": "function",
+    "function": {
+      "name": "delegate_to_sub_bot",
+      "description": "Delegate a task to a specialized sub-bot that has the tools to handle specific types of requests.",
+      "parameters": {
         "type": "object",
-        "required": [
-            "bot_name",
-            "message"
-        ],
+        "required": ["bot_name", "message"],
         "properties": {
-            "bot_name": {
-                "type": "string",
-                "description": "The name of the sub-bot to delegate to. Must be one of the available sub-bots from this list: users, ops_bot, targetprocess, pto_wfh. The capabilities of each bot are defined in your given system prompt."
-            },
-            "message": {
-                "type": "string",
-                "description": "A clear, detailed message to send to the sub-bot that includes all necessary information to complete the task. This should be a reformulation of the user's request with any additional context needed. Make it easy to understand from a chat bot's perspective on what needs to be accomplished and any parameters the need to be included to achieve this task."
-            }
-        },
-        "additionalProperties": false
+          "bot_name": {
+            "type": "string",
+            "description": "The name of the sub-bot to delegate to. Must be one of the available sub-bots from this list: users, ops_bot, targetprocess, pto_wfh. The capabilities of each bot are defined in your given system prompt."
+          },
+          "message": {
+            "type": "string",
+            "description": "A clear, detailed message to send to the sub-bot that includes all necessary information to complete the task. This should be a reformulation of the user's request with any additional context needed. Make it easy to understand from a chat bot's perspective on what needs to be accomplished and any parameters the need to be included to achieve this task."
+          }
+        }
+      }
     }
   }
 ]
