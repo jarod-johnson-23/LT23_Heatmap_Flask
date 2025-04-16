@@ -31,7 +31,7 @@
           "description": "The last name of the person to search for in the TargetProcess database."
         }
       },
-      "required": [],
+      "required": ["first_name"],
       "additionalProperties": false
     }
   }
