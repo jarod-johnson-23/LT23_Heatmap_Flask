@@ -185,6 +185,7 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
     result = _query_targetprocess_user(api_url)
 
     if isinstance(result, dict) and 'status' in result: # Check if helper returned an error dict
+        print(f"DEBUG: {result}")
         return result
     elif result is None or not result: # Check if helper returned None or empty list
         search_term = f"{first_name or ''} {last_name or ''}".strip()

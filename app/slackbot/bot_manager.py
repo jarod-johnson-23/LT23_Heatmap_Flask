@@ -42,6 +42,7 @@ class BotManager:
     
     def _load_instructions(self, path):
         """Load bot instructions from a file."""
+        print(f"DEBUG: Loading instructions for delegate botfrom {path}")
         try:
             with open(path, 'r') as f:
                 instructions = f.read().strip()
