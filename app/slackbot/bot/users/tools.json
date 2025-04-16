@@ -1,42 +1,38 @@
 [
   {
     "type": "function",
-    "function": {
-      "name": "search_user_info_by_email",
-      "description": "Gather base user information from the TargetProcess database using a user's email address.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string",
-            "description": "The email value used to search for the user in the TargetProcess database."
-          }
-        },
-        "required": ["email"],
-        "additionalProperties": false
-      }
+    "name": "search_user_info_by_email",
+    "description": "Gather base user information from the TargetProcess database using a user's email address.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "The email value used to search for the user in the TargetProcess database."
+        }
+      },
+      "required": ["email"],
+      "additionalProperties": false
     }
   },
   {
     "type": "function",
-    "function": {
-      "name": "search_user_info_by_name",
-      "description": "Gather base user information from the TargetProcess database using a person's first, or last, or both first and last names.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "first_name": {
-            "type": "string",
-            "description": "The first name of the person to search for in the TargetProcess database."
-          },
-          "last_name": {
-            "type": "string",
-            "description": "The last name of the person to search for in the TargetProcess database."
-          }
+    "name": "search_user_info_by_name",
+    "description": "Gather base user information from the TargetProcess database using a person's first, or last, or both first and last names.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "first_name": {
+          "type": "string",
+          "description": "The first name of the person to search for in the TargetProcess database."
         },
-        "required": [],
-        "additionalProperties": false
-      }
+        "last_name": {
+          "type": "string",
+          "description": "The last name of the person to search for in the TargetProcess database."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
     }
   }
 ]
