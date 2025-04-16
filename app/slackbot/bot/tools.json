@@ -1,5 +1,6 @@
 [
   {
+    "type": "function",
     "name": "delegate_to_sub_bot",
     "description": "Delegate a task to a specialized sub-bot that has the tools to handle specific types of requests.",
     "strict": true,
