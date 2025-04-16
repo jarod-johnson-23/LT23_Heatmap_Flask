@@ -21,6 +21,7 @@ from .database import (
 import requests
 import xml.etree.ElementTree as ET
 from .potenza import execute_sql_query
+from .bot_manager import bot_manager
 
 slackbot_bp = Blueprint("slackbot_bp", __name__)
 
@@ -105,173 +106,70 @@ scheduler.add_job(
 # Start the scheduler
 scheduler.start()
 
-def send_verification_email(email, code):
-    """Send a verification email with the one-time code."""
-    aws_region = "us-east-2"
-    
-    # Create a new SES resource and specify a region
-    client = boto3.client(
-        "ses",
-        region_name=aws_region,
-        aws_access_key_id=os.getenv("aws_access_key_id"),
-        aws_secret_access_key=os.getenv("aws_secret_access_key"),
-    )
-    
-    # Email content with the verification code
-    email_body = f"""
-    Hello,
-    
-    You've requested to authenticate with the LT Slack Bot. Your verification code is:
-    
-    {code}
-    
-    This code will expire in 10 minutes.
-    
-    If you didn't request this code, please ignore this email.
-    """
-    
+def send_verification_email(recipient_email, code):
+    """Send a verification code email using AWS SES, matching the dashboard pattern."""
+    SOURCE_EMAIL = "no-reply@laneterraleverapi.org" # Verified source email address
+    AWS_REGION = "us-east-2"  # Matching the dashboard example region
+    SUBJECT = "Your LT-AI Slackbot Verification Code"
+    # Simplified body text, similar to dashboard example structure
+    BODY_TEXT = (f"Hello,\n\n"
+                 f"Your verification code for the LT-AI Slackbot is: {code}\n\n"
+                 f"Please enter this code in your Slack chat with the bot to complete authentication.\n"
+                 f"If you did not request this code, please ignore this email.")
+    CHARSET = "UTF-8"
+
+    # Create a new SES resource, explicitly passing credentials like the dashboard example
     try:
-        # Send the email
+        client = boto3.client(
+            "ses",
+            region_name=AWS_REGION,
+            aws_access_key_id=os.getenv("aws_access_key_id"), # Explicitly get key
+            aws_secret_access_key=os.getenv("aws_secret_access_key") # Explicitly get secret
+        )
+    except Exception as e:
+         print(f"Error creating boto3 client: {e}")
+         # Handle case where credentials might not be found in env vars
+         # Depending on deployment, relying on IAM roles might be preferable,
+         # but this matches the provided dashboard pattern.
+         return False
+
+
+    # Try to send the email.
+    try:
+        # Provide the contents of the email, using only the Text body like the dashboard example
         response = client.send_email(
             Destination={
-                "ToAddresses": [email],
+                'ToAddresses': [
+                    recipient_email,
+                ],
             },
             Message={
-                "Body": {
-                    "Text": {
-                        "Charset": "UTF-8",
-                        "Data": email_body,
+                'Body': {
+                    # Only including Text part to match the dashboard pattern
+                    'Text': {
+                        'Charset': CHARSET,
+                        'Data': BODY_TEXT,
                     },
+                    # Removed Html part
                 },
-                "Subject": {
-                    "Charset": "UTF-8",
-                    "Data": "LT Slack Bot Verification Code",
+                'Subject': {
+                    'Charset': CHARSET,
+                    'Data': SUBJECT,
                 },
             },
-            Source="no-reply@laneterraleverapi.org",  # Your verified address
+            Source=SOURCE_EMAIL, # Use the verified source email address directly here
+            # ReplyToAddresses=[SENDER], # Optional: If you want replies to go somewhere specific
         )
+    # Display an error if something goes wrong.
+    except ClientError as e:
+        print(f"Email sending failed: {e.response['Error']['Message']}")
+        return False
+    except Exception as e: # Catch other potential errors (e.g., client creation failed)
+         print(f"An unexpected error occurred during email sending: {e}")
+         return False
+    else:
         print(f"Email sent! Message ID: {response['MessageId']}")
         return True
-    except ClientError as e:
-        print(f"An error occurred: {e.response['Error']['Message']}")
-        return False
-
-# Add this function to handle tool calls
-def handle_tool_call(name, args, user_email):
-    """Handle tool calls from the OpenAI API."""
-    print(f"Handling tool call: {name} with args: {args}")
-    
-    if name == "get_current_user_info":
-        print("Getting current user info")
-        # Extract username from email (part before @)
-        username = user_email.split('@')[0]
-        
-        # Get TargetProcess API key from environment variables
-        tp_api_key = os.getenv("TP_API_KEY")
-        
-        if not tp_api_key:
-            return {
-                "error": "TargetProcess API key not found in environment variables",
-                "email": user_email,
-                "message": "Could not retrieve user information from TargetProcess"
-            }
-        
-        # Construct the API URL
-        api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(email contains '{username}')&access_token={tp_api_key}"
-        
-        try:
-            # Make the API request
-            response = requests.get(api_url)
-            
-            # Check if the request was successful
-            if response.status_code == 200:
-                # Parse the XML response
-                root = ET.fromstring(response.content)
-                
-                # Check if any users were found
-                users = root.findall(".//User")
-                if not users:
-                    return {
-                        "error": "User not found in TargetProcess",
-                        "email": user_email,
-                        "message": "No matching user found in TargetProcess"
-                    }
-                
-                # Get the first matching user
-                user = users[0]
-                
-                # Extract basic user information
-                user_data = {
-                    "tp_id": user.get("Id", "Unknown"),
-                    "first_name": user.find("FirstName").text if user.find("FirstName") is not None else "Unknown",
-                    "last_name": user.find("LastName").text if user.find("LastName") is not None else "Unknown",
-                    "email": user.find("Email").text if user.find("Email") is not None else user_email,
-                    "create_date": user.find("CreateDate").text if user.find("CreateDate") is not None else "Unknown",
-                    "last_login_date": user.find("LastLoginDate").text if user.find("LastLoginDate") is not None else "Unknown"
-                }
-                
-                # Extract role information
-                role_element = user.find("Role")
-                if role_element is not None:
-                    user_data["role"] = role_element.get("Name", "Unknown")
-                else:
-                    user_data["role"] = "Unknown"
-                
-                # Extract custom fields
-                custom_fields = user.find("CustomFields")
-                if custom_fields is not None:
-                    fields = custom_fields.findall("Field")
-                    for field in fields:
-                        field_name = field.find("Name").text if field.find("Name") is not None else ""
-                        field_value = field.find("Value").text if field.find("Value") is not None else None
-                        
-                        if field_name == "Manager Name":
-                            user_data["manager_name"] = field_value or "Unknown"
-                        elif field_name == "Mobile Phone":
-                            user_data["mobile_phone"] = field_value or "Unknown"
-                        elif field_name == "Title":
-                            user_data["title"] = field_value or "Unknown"
-                        elif field_name == "Anniversary Date":
-                            user_data["anniversary_date"] = field_value or "Unknown"
-                        elif field_name == "Birthday Month Day":
-                            user_data["birthday"] = field_value or "Unknown"
-                        elif field_name == "Checkin Workstream":
-                            user_data["checkin_workstream"] = field_value or "Unknown"
-                
-                # Add default values for any missing fields
-                user_data.setdefault("manager_name", "Unknown")
-                user_data.setdefault("mobile_phone", "Unknown")
-                user_data.setdefault("title", "Unknown")
-                user_data.setdefault("anniversary_date", "Unknown")
-                user_data.setdefault("birthday", "Unknown")
-                user_data.setdefault("checkin_workstream", "Unknown")
-                
-                # Add source information
-                user_data["source"] = "TargetProcess"
-                print("GOT USER DATA", user_data)
-                
-                return user_data
-            else:
-                # Handle API error
-                return {
-                    "error": f"TargetProcess API returned status code {response.status_code}",
-                    "email": user_email,
-                    "message": "Error retrieving user information from TargetProcess"
-                }
-        
-        except Exception as e:
-            # Handle any exceptions
-            print(f"Error calling TargetProcess API: {str(e)}")
-            return {
-                "error": str(e),
-                "email": user_email,
-                "message": "Error retrieving user information from TargetProcess"
-            }
-    
-    # Add more function handlers here as needed
-    
-    # If no handler is found
-    return {"error": f"Function {name} not implemented"}
 
 @slackbot_bp.route("/events", methods=["POST"])
 def slack_events():
@@ -312,110 +210,57 @@ def slack_events():
                     # Get the previous response ID for this channel
                     previous_response_id = get_previous_response_id(channel_id)
                     
-                    # Load bot instructions and tools
-                    instructions = load_bot_instructions()
-                    tools = load_bot_tools()
-                    
-                    # Personalize instructions with user info and current date
-                    personalized_instructions = f"{instructions}\n\nYou are chatting with {user_email}."
-                    
-                    # Initialize input messages with the user's message
-                    input_messages = [
-                        {"role": "user", "content": text}
-                    ]
-                    
-                    # Process the conversation with potential function calls
                     try:
-                        # First API call to get initial response or function calls
-                        api_params = {
-                            "model": "gpt-4.1",
-                            "instructions": personalized_instructions,
-                            "previous_response_id": previous_response_id,
-                            "input": input_messages
-                        }
-                        
-                        # Add tools if available
-                        if tools:
-                            api_params["tools"] = tools
-                        
-                        # Make the initial API call
-                        response = client.responses.create(**api_params)
-                        
-                        # Update the response ID immediately after the first call
-                        # This ensures continuity for any subsequent calls
-                        update_response_id(channel_id, response.id)
-                        previous_response_id = response.id  # Update the local variable too
-                        
-                        # Check if there are any function calls in the response
-                        has_function_calls = False
-                        for output_item in response.output:
-                            if hasattr(output_item, 'type') and output_item.type == "function_call":
-                                has_function_calls = True
-                                break
-                        
-                        # If there are function calls, process them
-                        if has_function_calls:
-                            # Process each function call
-                            function_call_messages = []
-                            for output_item in response.output:
-                                if hasattr(output_item, 'type') and output_item.type == "function_call":
-                                    # Extract function call details
-                                    function_name = output_item.name
-                                    function_args = json.loads(output_item.arguments)
-                                    call_id = output_item.call_id
-                                    
-                                    # Execute the function
-                                    function_result = handle_tool_call(function_name, function_args, user_email)
-                                    
-                                    # Add the function result to function call messages
-                                    function_call_messages.append({
-                                        "type": "function_call_output",
-                                        "call_id": call_id,
-                                        "output": json.dumps(function_result)
-                                    })
+                        # Process the message using the bot manager
+                        response_obj = bot_manager.process_message(
+                            user_message=text,
+                            user_email=user_email,
+                            previous_response_id=previous_response_id
+                        )
 
-                            
-                            # Make a second API call with ONLY the function results
-                            # Use the updated previous_response_id from the first call
-                            second_response = client.responses.create(
-                                model="gpt-4o-mini",
-                                instructions=personalized_instructions,
-                                previous_response_id=previous_response_id,  # Using updated ID
-                                input=function_call_messages,
-                                tools=tools
-                            )
-                            
-                            # Update the response ID again after the second call
-                            update_response_id(channel_id, second_response.id)
-                            
-                            # Use the second response for the final output
-                            response = second_response
-                        
-                        # Extract the text response
-                        bot_response = ""
-                        for output_item in response.output:
-                            if hasattr(output_item, 'content') and output_item.content:
-                                for content_item in output_item.content:
-                                    if hasattr(content_item, 'text') and content_item.text:
-                                        bot_response += content_item.text
-                        
+                        # Update the response ID using the final response object's ID
+                        if hasattr(response_obj, 'id'):
+                            update_response_id(channel_id, response_obj.id)
+                        elif isinstance(response_obj, dict) and 'id' in response_obj: # Handle potential error dict with ID
+                             update_response_id(channel_id, response_obj['id'])
+
+                        # Extract the final text response from the response object
+                        bot_response_text = ""
+                        if hasattr(response_obj, 'output'):
+                             for output_item in response_obj.output:
+                                 if hasattr(output_item, 'content') and output_item.content:
+                                     for content_item in output_item.content:
+                                         if hasattr(content_item, 'text') and content_item.text:
+                                             bot_response_text += content_item.text
+                        elif isinstance(response_obj, dict) and 'error' in response_obj:
+                             # Handle cases where process_message returned an error dict directly
+                             bot_response_text = response_obj.get('output', [{}])[0].get('content', [{}])[0].get('text', f"An error occurred: {response_obj['error']}")
+
                         # Send the response back to Slack
-                        if bot_response:
+                        if bot_response_text:
                             slack_client.chat_postMessage(
                                 channel=channel_id,
-                                text=bot_response
+                                text=bot_response_text
                             )
                         else:
+                            # Handle cases where no text response was generated
+                            print("Warning: No text response generated by bot manager.")
                             slack_client.chat_postMessage(
                                 channel=channel_id,
-                                text="I'm sorry, I couldn't generate a response. Please try again."
+                                text="I received your message, but I couldn't generate a text response."
                             )
+
                     except Exception as e:
-                        print(f"Error: {e}")
-                        slack_client.chat_postMessage(
-                            channel=channel_id,
-                            text=f"Sorry, I encountered an error: {str(e)}"
-                        )
+                        print(f"Error in Slack event handler: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        try:
+                            slack_client.chat_postMessage(
+                                channel=channel_id,
+                                text=f"Sorry, I encountered an unexpected error while processing your request."
+                            )
+                        except Exception as slack_e:
+                             print(f"Failed to send error message to Slack: {slack_e}")
                 else:
                     # User is not authenticated, handle authentication flow
                     # Check if the message contains a verification code (6 digits)
