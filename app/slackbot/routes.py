@@ -215,6 +215,7 @@ def slack_events():
                         response_obj = bot_manager.process_message(
                             user_message=text,
                             user_email=user_email,
+                            slack_id=user_id,
                             previous_response_id=previous_response_id
                         )
 

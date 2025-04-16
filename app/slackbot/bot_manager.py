@@ -5,6 +5,7 @@ from datetime import datetime
 from openai import OpenAI
 import importlib  # <-- Add this import for dynamic loading
 import traceback # <-- Add this for error logging
+import inspect # <-- Add this import
 
 # Initialize OpenAI client
 client = OpenAI(
@@ -99,7 +100,7 @@ class BotManager:
         
         return sub_bots
     
-    def process_message(self, user_message, user_email, previous_response_id=None):
+    def process_message(self, user_message, user_email, slack_id, previous_response_id=None):
         """
         Process a user message through the main bot and delegate to sub-bots if needed.
         
@@ -149,7 +150,8 @@ class BotManager:
                     sub_bot_final_response_obj = self._process_with_sub_bot(
                         delegation_bot_name,
                         delegation_message,
-                        user_email
+                        user_email,
+                        slack_id
                     )
                     
                     # Extract the result/output from the sub-bot's final response
@@ -221,8 +223,9 @@ class BotManager:
             # This part might need refinement based on how errors should be presented
             return {"error": str(e), "output": [{"content": [{"text": f"An internal error occurred: {e}"}]}]}
     
-    def _execute_sub_bot_function(self, bot_name, function_name, function_args, user_email):
-        """Dynamically load and execute a function from a sub-bot's functions.py."""
+    def _execute_sub_bot_function(self, bot_name, function_name, function_args, user_email, slack_id):
+        """Dynamically load and execute a function from a sub-bot's functions.py,
+           passing user_email and slack_id only if the function expects them."""
         try:
             sub_bot_config = self.sub_bots.get(bot_name)
             if not sub_bot_config:
@@ -237,19 +240,40 @@ class BotManager:
 
             if hasattr(bot_module, function_name):
                 function_to_call = getattr(bot_module, function_name)
-                print(f"DEBUG: Executing function '{function_name}' from {module_name} with args: {function_args}")
+                print(f"DEBUG: Preparing to execute function '{function_name}' from {module_name}")
 
-                # Inject user_email and potentially other shared resources if needed by the function
-                # Modify function signature in functions.py accordingly if they need these
-                # Example: Pass user_email if the function needs it
-                if "user_email" in function_to_call.__code__.co_varnames:
-                     result = function_to_call(**function_args, user_email=user_email)
-                # Example: Pass potenza_api if the function needs it
-                elif "potenza_api" in function_to_call.__code__.co_varnames and potenza_api:
-                     result = function_to_call(**function_args, potenza_api=potenza_api)
-                else:
-                     # Call function normally if it doesn't need extra context
-                     result = function_to_call(**function_args)
+                # --- Inspect function signature and build final arguments ---
+                sig = inspect.signature(function_to_call)
+                func_params = sig.parameters
+
+                # Start with arguments provided by the LLM
+                final_args = function_args.copy() # Use a copy to avoid modifying the original dict
+
+                # Add user_email if the function expects it
+                if 'user_email' in func_params:
+                    final_args['user_email'] = user_email
+                    print(f"DEBUG: Adding 'user_email' to args for {function_name}")
+
+                # Add slack_id if the function expects it
+                if 'slack_id' in func_params:
+                    final_args['slack_id'] = slack_id
+                    print(f"DEBUG: Adding 'slack_id' to args for {function_name}")
+
+                # Add potenza_api if the function expects it and it's available
+                if 'potenza_api' in func_params:
+                    if potenza_api:
+                        final_args['potenza_api'] = potenza_api
+                        print(f"DEBUG: Adding 'potenza_api' to args for {function_name}")
+                    else:
+                        print(f"WARNING: Function '{function_name}' expects 'potenza_api', but it's not available.")
+                        # Decide how to handle this: error out or proceed without it?
+                        # Let's return an error for now, as the function might rely on it.
+                        return {"error": f"Function '{function_name}' requires Potenza API, which is not configured."}
+
+                # --- Execute the function with the constructed arguments ---
+                print(f"DEBUG: Executing '{function_name}' with final args: {list(final_args.keys())}") # Log keys, not values potentially containing secrets
+                result = function_to_call(**final_args)
+                # --- End function execution ---
 
                 print(f"DEBUG: Function '{function_name}' executed. Result: {result}")
                 # Ensure result is JSON serializable
@@ -273,7 +297,7 @@ class BotManager:
             traceback.print_exc()
             return {"error": f"Error executing function '{function_name}': {str(e)}"}
     
-    def _process_with_sub_bot(self, bot_name, message, user_email):
+    def _process_with_sub_bot(self, bot_name, message, user_email, slack_id):
         """
         Process a message with a specific sub-bot, handling its internal function calls.
         Returns the *final* OpenAI response object after all processing.
@@ -287,7 +311,7 @@ class BotManager:
             tools = self._load_tools(sub_bot["tools_path"])
             personalized_instructions = f"{instructions}\n\nYou are processing a task for {user_email}."
 
-            print(f"DEBUG: Calling Sub-Bot '{bot_name}' (Model: {self.model}) with message: '{message}'")
+            print(f"DEBUG: Calling Sub-Bot '{bot_name}' (Model: {self.model}) with message: '{message}' and slack_id: {slack_id}")
             # Initial call to the sub-bot
             response = client.responses.create(
                 model=self.model,
@@ -322,7 +346,8 @@ class BotManager:
                              bot_name,
                              function_name,
                              function_args,
-                             user_email # Pass user email context
+                             user_email, # Pass user email context
+                             slack_id # Pass slack id context
                          )
 
                     function_results.append({
