@@ -1,0 +1,56 @@
+[
+  {
+    "type": "function",
+    "name": "get_current_cycles",
+    "description": "Retrieves details about the current development cycle(s), including name, start date, end date, and days remaining. Use this when asked 'what cycle are we in?', 'what's the current cycle?', 'when does the cycle end?', etc.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_cycle_by_date",
+    "description": "Finds the development cycle(s) that were active on a specific calendar date. The LLM MUST parse the user's requested date (e.g., 'July 10th', 'next Tuesday') into the ISO format 'YYYY-MM-DD' before calling this tool. Use the current year unless the date has already passed this year, in which case use the next year.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date_iso": {
+          "type": "string",
+          "description": "The specific date to check for active cycles, formatted strictly as YYYY-MM-DD. Example: '2024-07-30'."
+        }
+      },
+      "required": ["date_iso"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_cycle_details_by_name",
+    "description": "Retrieves the start date, end date, and days until start for a specific development cycle identified by its name/number (e.g., '1269', '2261'). Use this when asked for the dates or start time of a specific cycle number.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name or number of the cycle to retrieve details for. Should be a numeric string like '1269'."
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_latest_cycle_completion",
+    "description": "Retrieves the completion statistics (total completed dollars and percentage completed) for the most recently finished development cycle.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+]

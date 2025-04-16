@@ -36,5 +36,32 @@
       "required": ["name"],
       "additionalProperties": false
     }
+  },
+  {
+    "type": "function",
+    "name": "get_users_wfh_today",
+    "description": "Gets a list of all employees who are marked as Working From Home (WFH) for the current date (today). Use this when asked 'who is working from home today?', 'who is remote today?', 'is anyone WFH?', etc.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_upcoming_wfh_by_name",
+    "description": "Looks up scheduled future Work From Home (WFH) dates for a specific employee based on their name. Use this to find out when someone is planning to work remotely in the future.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The first name, last name, or full name of the employee whose upcoming WFH should be checked."
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    }
   }
 ]

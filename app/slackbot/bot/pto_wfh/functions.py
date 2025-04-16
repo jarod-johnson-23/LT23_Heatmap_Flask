@@ -282,4 +282,170 @@ def get_upcoming_pto_by_name(name: str):
             "error_details": str(e)
         }
 
+def get_users_wfh_today():
+    """
+    Retrieves a list of users who are marked as Working From Home (WFH) today.
+
+    Returns:
+        A dictionary containing the status and a list of users WFH today,
+        including their name and whether it's a partial day, or an error message.
+    """
+    print("Executing get_users_wfh_today")
+
+    # 1. Get today's date
+    today_date = datetime.now().strftime('%Y-%m-%d')
+    print(f"DEBUG: Checking WFH for date: {today_date}")
+
+    # 2. Define and format the SQL query
+    #    Note: Ensure the date is quoted in the SQL WHERE clause.
+    sql_query = f"""
+        SELECT u.distinct_name, case when hours < 7 THEN 1 else 0 end as is_partial
+        FROM actual_hours_recent_detailed ah left join users u
+             on u.user_id = ah.user_id
+        WHERE ah.story_id in ( SELECT story_id FROM recent_wfh_stories )
+             AND u.is_active = 1
+             AND transaction_date = '{today_date}'
+        ORDER BY ah.role_type, u.distinct_name
+    """
+
+    # 3. Execute the query using Potenza API
+    try:
+        print(f"DEBUG: Executing Potenza SQL for users WFH today:\n{sql_query}")
+        result = potenza_api.execute_sql(sql_query)
+        print(f"DEBUG: Potenza Result: {result}")
+
+        # 4. Process the result
+        if isinstance(result, list):
+            users_wfh = []
+            for row in result:
+                users_wfh.append({
+                    "name": row.get('distinct_name'),
+                    "is_partial_day": bool(row.get('is_partial', 0)) # Convert 1/0 to True/False
+                })
+
+            message = f"Found {len(users_wfh)} user(s) working from home today ({today_date})."
+            if not users_wfh:
+                 message = f"No users found working from home today ({today_date})."
+
+            print(f"DEBUG: {message}")
+
+            # 5. Format success response
+            return {
+                "status": "success",
+                "message": message,
+                "data": {
+                    "date_checked": today_date,
+                    "users_wfh": users_wfh
+                }
+            }
+        # Handle empty list as success (no one WFH) - combined with above check
+        # elif isinstance(result, list) and len(result) == 0: ...
+
+        else:
+            # Handle unexpected result format from Potenza
+            print(f"ERROR: Unexpected result format from Potenza API for users WFH: {result}")
+            return {
+                "status": "failure_tool_error",
+                "reason": "Received an unexpected response format while fetching today's WFH list.",
+                "error_details": f"Unexpected Potenza result type: {type(result)}"
+            }
+
+    except Exception as e:
+        print(f"ERROR: Failed to execute Potenza SQL or process result for users WFH today: {e}")
+        traceback.print_exc()
+        return {
+            "status": "failure_tool_error",
+            "reason": "An error occurred while communicating with the data source for today's WFH list.",
+            "error_details": str(e)
+        }
+
+def get_upcoming_wfh_by_name(name: str):
+    """
+    Retrieves upcoming Work From Home (WFH) dates for a user based on their name.
+
+    Args:
+        name: The name (or partial name) of the user to search for.
+
+    Returns:
+        A dictionary containing the status and a list of upcoming WFH entries
+        (each with transaction_date, hours, is_partial_day), or an error message.
+    """
+    print(f"Executing get_upcoming_wfh_by_name for name: '{name}'")
+
+    # 1. Validate input
+    if not name or not isinstance(name, str) or len(name.strip()) == 0:
+        return {
+            "status": "failure_invalid_input",
+            "reason": "A valid name must be provided to search for upcoming WFH.",
+            "missing_parameters": ["name"]
+        }
+
+    search_name = name.strip()
+
+    # 2. Define and format the SQL query
+    #    Added ORDER BY transaction_date for clarity.
+    sql_query = f"""
+        SELECT transaction_date, hours, case when hours < 7 THEN 1 else 0 end as is_partial
+        FROM actual_hours_recent_detailed ah
+        WHERE ah.story_id in ( SELECT story_id FROM recent_wfh_stories )
+          AND person LIKE '%{search_name}%'
+          AND serial_day >= 0
+        ORDER BY transaction_date
+    """
+
+    # 3. Execute the query using Potenza API
+    try:
+        print(f"DEBUG: Executing Potenza SQL for upcoming WFH for name '{search_name}':\n{sql_query}")
+        result = potenza_api.execute_sql(sql_query)
+        print(f"DEBUG: Potenza Result: {result}")
+
+        # 4. Process the result
+        if isinstance(result, list):
+            wfh_entries = []
+            for row in result:
+                # Extract relevant data
+                entry = {
+                    "transaction_date": row.get('transaction_date'),
+                    "hours": row.get('hours'),
+                    "is_partial_day": bool(row.get('is_partial', 0))
+                }
+                # Basic validation
+                if entry["transaction_date"] and entry["hours"] is not None:
+                     wfh_entries.append(entry)
+                else:
+                     print(f"WARNING: Skipping row with missing data in upcoming WFH query: {row}")
+
+            message = f"Found {len(wfh_entries)} upcoming WFH entries matching the name '{search_name}'."
+            if not wfh_entries:
+                 message = f"No upcoming WFH entries found matching the name '{search_name}'."
+
+            print(f"DEBUG: {message}")
+
+            # 5. Format success response
+            return {
+                "status": "success",
+                "message": message,
+                "data": {
+                    "search_name": search_name,
+                    "upcoming_wfh": wfh_entries # Return the list of entries
+                }
+            }
+        else:
+            # Handle unexpected result format from Potenza
+            print(f"ERROR: Unexpected result format from Potenza API for upcoming WFH: {result}")
+            return {
+                "status": "failure_tool_error",
+                "reason": "Received an unexpected response format while fetching upcoming WFH.",
+                "error_details": f"Unexpected Potenza result type: {type(result)}"
+            }
+
+    except Exception as e:
+        print(f"ERROR: Failed to execute Potenza SQL or process result for upcoming WFH for name '{search_name}': {e}")
+        traceback.print_exc()
+        return {
+            "status": "failure_tool_error",
+            "reason": "An error occurred while communicating with the data source for upcoming WFH.",
+            "error_details": str(e)
+        }
+
 

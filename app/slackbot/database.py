@@ -65,6 +65,17 @@ def init_db():
     )
     ''')
     
+    # Create table for tracking tool usage
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS tool_usage_log (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        function_name TEXT NOT NULL,
+        user_email TEXT NOT NULL,
+        slack_id TEXT NOT NULL,
+        called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -464,6 +475,33 @@ def get_targetprocess_id_by_slack_id(slack_user_id):
     except sqlite3.Error as e:
         print(f"Database error fetching targetprocess_id for {slack_user_id}: {e}")
         return None
+    finally:
+        if conn:
+            conn.close() 
+
+def log_tool_usage(function_name: str, user_email: str, slack_id: str):
+    """Logs the usage of a tool function."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO tool_usage_log (function_name, user_email, slack_id)
+            VALUES (?, ?, ?)
+            """,
+            (function_name, user_email, slack_id)
+        )
+        conn.commit()
+        print(f"DEBUG: Logged tool usage: Function='{function_name}', User='{user_email}', SlackID='{slack_id}'")
+    except sqlite3.Error as e:
+        print(f"ERROR: Failed to log tool usage for function '{function_name}', user '{user_email}': {e}")
+        # Decide if you want to rollback? Probably not critical enough to stop execution.
+        # if conn:
+        #     conn.rollback()
+    except Exception as e:
+        # Catch other potential errors
+        print(f"ERROR: An unexpected error occurred during tool usage logging: {e}")
     finally:
         if conn:
             conn.close() 

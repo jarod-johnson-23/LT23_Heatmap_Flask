@@ -6,6 +6,7 @@ from openai import OpenAI
 import importlib  # <-- Add this import for dynamic loading
 import traceback # <-- Add this for error logging
 import inspect # <-- Add this import
+from app.slackbot.database import log_tool_usage # <-- Import the logging function
 
 # Initialize OpenAI client
 client = OpenAI(
@@ -225,7 +226,8 @@ class BotManager:
     
     def _execute_sub_bot_function(self, bot_name, function_name, function_args, user_email, slack_id):
         """Dynamically load and execute a function from a sub-bot's functions.py,
-           passing user_email and slack_id only if the function expects them."""
+           passing user_email and slack_id only if the function expects them,
+           and log the function call."""
         try:
             sub_bot_config = self.sub_bots.get(bot_name)
             if not sub_bot_config:
@@ -245,35 +247,31 @@ class BotManager:
                 # --- Inspect function signature and build final arguments ---
                 sig = inspect.signature(function_to_call)
                 func_params = sig.parameters
-
-                # Start with arguments provided by the LLM
-                final_args = function_args.copy() # Use a copy to avoid modifying the original dict
-
-                # Add user_email if the function expects it
+                final_args = function_args.copy()
                 if 'user_email' in func_params:
                     final_args['user_email'] = user_email
-                    print(f"DEBUG: Adding 'user_email' to args for {function_name}")
-
-                # Add slack_id if the function expects it
+                    # print(f"DEBUG: Adding 'user_email' to args for {function_name}") # Optional debug
                 if 'slack_id' in func_params:
                     final_args['slack_id'] = slack_id
-                    print(f"DEBUG: Adding 'slack_id' to args for {function_name}")
-
-                # Add potenza_api if the function expects it and it's available
+                    # print(f"DEBUG: Adding 'slack_id' to args for {function_name}") # Optional debug
                 if 'potenza_api' in func_params:
                     if potenza_api:
                         final_args['potenza_api'] = potenza_api
-                        print(f"DEBUG: Adding 'potenza_api' to args for {function_name}")
+                        # print(f"DEBUG: Adding 'potenza_api' to args for {function_name}") # Optional debug
                     else:
-                        print(f"WARNING: Function '{function_name}' expects 'potenza_api', but it's not available.")
-                        # Decide how to handle this: error out or proceed without it?
-                        # Let's return an error for now, as the function might rely on it.
                         return {"error": f"Function '{function_name}' requires Potenza API, which is not configured."}
 
                 # --- Execute the function with the constructed arguments ---
-                print(f"DEBUG: Executing '{function_name}' with final args: {list(final_args.keys())}") # Log keys, not values potentially containing secrets
+                print(f"DEBUG: Executing '{function_name}' with final args: {list(final_args.keys())}")
                 result = function_to_call(**final_args)
                 # --- End function execution ---
+
+                # --- Log the tool usage after executing ---
+                try:
+                    log_tool_usage(function_name, user_email, slack_id)
+                except Exception as log_e:
+                    print(f"WARNING: Failed to log tool usage for {function_name} due to: {log_e}")
+                # --- End logging ---
 
                 print(f"DEBUG: Function '{function_name}' executed. Result: {result}")
                 # Ensure result is JSON serializable
@@ -285,6 +283,7 @@ class BotManager:
                      return {"error": "Function result is not JSON serializable", "function": function_name}
 
             else:
+                # ... (handle function not found) ...
                 print(f"ERROR: Function '{function_name}' not found in {module_name}")
                 return {"error": f"Function '{function_name}' not found in sub-bot '{bot_name}'."}
 
