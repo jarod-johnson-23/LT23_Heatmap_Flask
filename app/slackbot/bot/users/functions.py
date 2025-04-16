@@ -164,12 +164,13 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
             "reason": "TargetProcess API key is missing.",
             "error_details": "TP_API_KEY not set in environment."
         }
-
     where_clauses = []
-    if first_name:
-        where_clauses.append(f"(FirstName contains '{first_name}')")
-    if last_name:
-        where_clauses.append(f"(LastName contains '{last_name}')")
+    if first_name and last_name:
+        where_clauses.append(f"FullName contains '{first_name} {last_name}'")
+    elif first_name:
+        where_clauses.append(f"FirstName contains '{first_name}'")
+    elif last_name:
+        where_clauses.append(f"LastName contains '{last_name}'")
 
     if not where_clauses:
         return {
