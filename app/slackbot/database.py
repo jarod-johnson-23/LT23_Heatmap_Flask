@@ -5,6 +5,9 @@ import random
 import string
 from pathlib import Path
 from datetime import datetime, timedelta
+import requests
+import xml.etree.ElementTree as ET
+import traceback
 
 # Ensure the database directory exists
 DB_DIR = Path(__file__).parent / "data"
@@ -36,6 +39,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS authenticated_users (
         slack_user_id TEXT PRIMARY KEY,
         email TEXT UNIQUE,
+        targetprocess_id INTEGER,
         authenticated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
@@ -120,59 +124,162 @@ def store_verification_code(slack_user_id, email, code):
     conn.commit()
     conn.close()
 
+def get_targetprocess_id(email):
+    """
+    Queries the TargetProcess API to find the User ID based on email.
+
+    Args:
+        email (str): The email address to search for.
+
+    Returns:
+        int: The TargetProcess User ID if found.
+        None: If the user is not found, the API key is missing,
+              or an error occurs during the API call or parsing.
+    """
+    tp_api_key = os.getenv("TP_API_KEY")
+    if not tp_api_key:
+        print("ERROR: TargetProcess API key not found in environment variables for ID lookup.")
+        # Decide if this should raise an error or just return None.
+        # Returning None allows authentication to potentially proceed without the ID.
+        return None
+    username = email
+    if '@' in email:
+      username = email.split('@')[0]
+
+    # Use exact match for email to find the specific user
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{username}')&access_token={tp_api_key}" # Only need ID
+
+    try:
+        print(f"DEBUG: Querying TargetProcess for ID for email: {email}")
+        response = requests.get(api_url, timeout=10) # Shorter timeout might be okay
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+        root = ET.fromstring(response.content)
+        user_element = root.find(".//User") # Find the first User element
+
+        if user_element is not None:
+            user_id_str = user_element.get('Id')
+            if user_id_str:
+                try:
+                    user_id_int = int(user_id_str)
+                    print(f"DEBUG: Found TargetProcess ID {user_id_int} for email {email}")
+                    return user_id_int
+                except ValueError:
+                    print(f"ERROR: Could not convert TargetProcess ID '{user_id_str}' to integer for email {email}.")
+                    return None
+            else:
+                print(f"DEBUG: User found for email {email}, but 'Id' attribute missing in XML.")
+                return None
+        else:
+            print(f"DEBUG: No user found in TargetProcess for email: {email}")
+            return None # User not found
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error calling TargetProcess API for ID lookup ({api_url}): {e}")
+        return None
+    except ET.ParseError as e:
+        print(f"Error parsing TargetProcess XML response for ID lookup: {e}")
+        error_context = response.text[:200] if 'response' in locals() else "N/A"
+        print(f"DEBUG: Response Text (first 200 chars): {error_context}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error during TargetProcess ID lookup for {email}: {e}")
+        traceback.print_exc()
+        return None
+
 def verify_code(slack_user_id, code):
-    """Verify a code for a user and authenticate them if correct."""
+    """
+    Verify a code for a user. If correct, attempt to find their TargetProcess ID.
+    Authenticate the user only if the code is valid AND the TargetProcess ID is found.
+    """
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
-    
+
     # Calculate the expiry timestamp
     expiry_timestamp = (datetime.now() - timedelta(minutes=VERIFICATION_EXPIRY_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
-    
+
     cursor.execute(
         """
-        SELECT email, code, created_at FROM verification_codes 
+        SELECT email, code, created_at FROM verification_codes
         WHERE slack_user_id = ?
         """,
         (slack_user_id,)
     )
-    
+
     result = cursor.fetchone()
-    
+
     if not result:
         conn.close()
-        return False, "No verification code found"
-    
+        return False, "No verification code found for this user."
+
     email, stored_code, created_at = result
-    
+
     # Check if the code has expired
     if created_at < expiry_timestamp:
+        # Clean up expired code
+        cursor.execute("DELETE FROM verification_codes WHERE slack_user_id = ?", (slack_user_id,))
+        conn.commit()
         conn.close()
-        return False, "Verification code has expired"
-    
+        return False, "Verification code has expired. Please request a new one."
+
     # Check if the code matches
     if code != stored_code:
+        # Don't delete the code yet, maybe they mistyped
         conn.close()
-        return False, "Invalid verification code"
-    
-    # Code is valid, authenticate the user
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO authenticated_users (slack_user_id, email, authenticated_at) 
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        """,
-        (slack_user_id, email)
-    )
-    
-    # Delete the verification code
-    cursor.execute(
-        "DELETE FROM verification_codes WHERE slack_user_id = ?",
-        (slack_user_id,)
-    )
-    
-    conn.commit()
-    conn.close()
-    
-    return True, email
+        return False, "Invalid verification code."
+
+    # --- Code is valid, now attempt to get the targetprocess_id ---
+    print(f"Verification code matched for {email}. Attempting to get TargetProcess ID.")
+    targetprocess_id = get_targetprocess_id(email)
+
+    # --- CRITICAL CHECK: Fail authentication if TP ID not found ---
+    if targetprocess_id is None:
+        print(f"ERROR: Could not retrieve TargetProcess ID for {email}. Authentication failed.")
+        # Clean up the used verification code even on failure
+        cursor.execute("DELETE FROM verification_codes WHERE slack_user_id = ?", (slack_user_id,))
+        conn.commit()
+        conn.close()
+        # Return a specific error message to the user
+        return False, "Your code is correct, but could not find a matching TargetProcess user for your email. Please ensure your email matches TargetProcess exactly. Authentication failed."
+    # --- End TP ID check ---
+
+    # --- Both code and TP ID are valid, authenticate the user ---
+    try:
+        print(f"TargetProcess ID {targetprocess_id} found for {email}. Authenticating user.")
+        cursor.execute(
+            """
+            INSERT INTO authenticated_users (slack_user_id, email, targetprocess_id, authenticated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(slack_user_id) DO UPDATE SET
+                email=excluded.email,
+                targetprocess_id=excluded.targetprocess_id,
+                authenticated_at=CURRENT_TIMESTAMP
+            """,
+            (slack_user_id, email, targetprocess_id) # Pass the retrieved ID
+        )
+
+        # Code verified, TP ID found, user inserted/updated. Now delete the verification code.
+        cursor.execute(
+            "DELETE FROM verification_codes WHERE slack_user_id = ?",
+            (slack_user_id,)
+        )
+
+        conn.commit()
+        print(f"User {slack_user_id} ({email}) authenticated successfully. TP ID: {targetprocess_id}")
+        return True, email
+
+    except sqlite3.Error as e:
+        print(f"Database error during user authentication or code deletion for {slack_user_id}: {e}")
+        conn.rollback() # Roll back any partial changes
+        # Clean up the verification code even on database error during insert
+        try:
+            cursor.execute("DELETE FROM verification_codes WHERE slack_user_id = ?", (slack_user_id,))
+            conn.commit()
+        except sqlite3.Error as del_e:
+             print(f"Failed to delete verification code after DB error for {slack_user_id}: {del_e}")
+        return False, "A database error occurred during authentication."
+    finally:
+        conn.close()
 
 def get_previous_response_id(channel_id):
     """Get the previous response ID for a given channel if not expired."""
