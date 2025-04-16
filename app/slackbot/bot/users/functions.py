@@ -126,7 +126,7 @@ def search_user_info_by_email(email: str):
     # --- End extraction ---
 
     # Construct the API URL - ADD CustomFields to include parameter
-    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{username}')&access_token={tp_api_key}&include=[FirstName,LastName,Email,Id,Role,CustomFields[Name,Value]]" # Added CustomFields
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{username}')&access_token={tp_api_key}" # Added CustomFields
 
     result = _query_targetprocess_user(api_url)
 
@@ -180,7 +180,7 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
     where_string = " and ".join(where_clauses)
 
     # Construct the API URL - ADD CustomFields to include parameter
-    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=({where_string})&access_token={tp_api_key}&include=[FirstName,LastName,Email,Id,Role,CustomFields[Name,Value]]" # Added CustomFields
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=({where_string})&access_token={tp_api_key}" # Added CustomFields
 
     result = _query_targetprocess_user(api_url)
 
