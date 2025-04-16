@@ -22,6 +22,7 @@
         - The specific parameters each tool requires (e.g., `first_name`).
         - Which parameters are mandatory (`required`).
         You should primarily expect tool(s) designed for looking up employee details using their name. Or if the user is asking for their own information then it will most likely need to be done through email.
+        You should assume that 
     </AvailableTools>
 
     <ProcessingLogic>

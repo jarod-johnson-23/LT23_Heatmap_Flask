@@ -80,7 +80,7 @@ def _query_targetprocess_user(api_url):
 def search_user_info_by_email(email: str):
     """
     Implements the tool 'search_user_info_by_email'.
-    Finds a user's details in TargetProcess based on a specific email address.
+    Finds a user's details in TargetProcess based on the username part of a specific email address.
     """
     print(f"Executing search_user_info_by_email for: {email}")
     tp_api_key = os.getenv("TP_API_KEY") # Need API key for URL construction
@@ -97,26 +97,44 @@ def search_user_info_by_email(email: str):
              "reason": "Email parameter cannot be empty.",
          }
 
-    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{email}')&access_token={tp_api_key}"
+    # --- Extract username part from email ---
+    if '@' in email:
+        username = email.split('@')[0]
+        print(f"DEBUG: Extracted username '{username}' from email '{email}' for search.")
+    else:
+        # If no '@' is present, maybe treat the whole input as the username?
+        # Or return an error? Let's assume treat as username for now.
+        username = email
+        print(f"DEBUG: Input '{email}' does not contain '@', searching using the full string.")
+    # --- End extraction ---
+
+    # Construct the API URL using the extracted username part with 'contains'
+    # This assumes the username part is unique enough or the first result is desired.
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{username}')&access_token={tp_api_key}"
 
     result = _query_targetprocess_user(api_url)
 
     if isinstance(result, dict) and 'status' in result: # Check if helper returned an error dict
         return result
     elif result is None or not result: # Check if helper returned None or empty list
-        print(f"User not found in TargetProcess for email: {email}")
+        print(f"User not found in TargetProcess for email containing '{username}' (from input '{email}')")
         return {
             "status": "failure_not_found",
-            "reason": f"No user found in TargetProcess with the email address '{email}'.",
-            "email_searched": email
+            # Modify reason slightly to reflect the search method
+            "reason": f"No user found in TargetProcess with an email containing '{username}'.",
+            "email_searched": email,
+            "username_searched": username
         }
     else:
-        # Email should be unique, so we expect only one result. Return the first item.
+        # Even searching by username might return multiple if emails share a prefix.
+        # However, for this function's intent (search by *email*), we likely still
+        # want the single most relevant result if possible.
+        # If multiple are returned, taking the first one is a common approach.
         user_data = result[0]
-        print(f"Successfully found user by email {email}: {user_data}")
+        print(f"Successfully found user matching email '{email}' (searched by username '{username}'): {user_data}")
         return {
             "status": "success",
-            "message": f"User found for email {email}.",
+            "message": f"User found matching email '{email}'.",
             "data": user_data # Return the single user dictionary
         }
 
