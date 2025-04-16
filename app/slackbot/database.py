@@ -441,3 +441,29 @@ def cleanup_old_processed_messages():
     conn.close()
     
     return deleted_count 
+
+def get_targetprocess_id_by_slack_id(slack_user_id):
+    """Retrieves the targetprocess_id for a given Slack user ID."""
+    conn = None
+    try:
+        # Use the existing DB_PATH or define it if not globally available here
+        # Assuming DB_PATH is defined globally or accessible
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT targetprocess_id FROM authenticated_users WHERE slack_user_id = ?",
+            (slack_user_id,)
+        )
+        result = cursor.fetchone()
+        if result and result[0] is not None:
+            print(f"DEBUG: Found targetprocess_id {result[0]} for slack_id {slack_user_id}")
+            return result[0]
+        else:
+            print(f"DEBUG: No targetprocess_id found in DB for slack_id {slack_user_id}")
+            return None
+    except sqlite3.Error as e:
+        print(f"Database error fetching targetprocess_id for {slack_user_id}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close() 
