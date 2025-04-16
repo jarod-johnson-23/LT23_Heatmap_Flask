@@ -5,7 +5,9 @@ import traceback # For detailed error logging
 
 # --- Helper Function for TargetProcess API Calls ---
 def _query_targetprocess_user(api_url):
-    """Internal helper to query TP API and parse user info."""
+    """
+    Internal helper to query TP API and parse user info based on the provided XML structure.
+    """
     tp_api_key = os.getenv("TP_API_KEY")
     if not tp_api_key:
         print("ERROR: TargetProcess API key not found in environment variables")
@@ -17,11 +19,12 @@ def _query_targetprocess_user(api_url):
 
     try:
         print(f"DEBUG: Querying TargetProcess API: {api_url}") # Log the URL being called
+        # Ensure the API call includes necessary fields, especially CustomFields
+        # Check if the include parameter needs adjustment in the calling functions
+        # Example: &include=[FirstName,LastName,Email,Id,CreateDate,Role,CustomFields[Name,Value]]
+        # NOTE: The calling functions search_user_info_by_email/name currently DO NOT include CustomFields. This needs to be added there.
         response = requests.get(api_url, timeout=15)
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-
-        # Log raw response for debugging if needed
-        # print(f"DEBUG: TargetProcess Raw Response: {response.text}")
 
         root = ET.fromstring(response.content)
         users = root.findall(".//User")
@@ -30,20 +33,35 @@ def _query_targetprocess_user(api_url):
             print("DEBUG: No users found in TargetProcess response.")
             return None # Indicate user not found
 
-        # --- Handling Multiple Users ---
-        # If the API might return multiple users (especially for name search),
-        # decide how to handle them. For now, we'll return a list.
         user_list = []
         for user_element in users:
             user_info = {}
+
+            # --- Basic Fields ---
             user_info['id'] = user_element.get('Id')
             user_info['first_name'] = user_element.findtext('FirstName')
             user_info['last_name'] = user_element.findtext('LastName')
             user_info['email'] = user_element.findtext('Email')
-            # Assuming CreateDate is the anniversary date - adjust if needed
-            user_info['anniversary_date'] = user_element.findtext('CreateDate')
             user_info['role'] = user_element.findtext('Role/Name')
-            # Add other relevant fields if needed from TP
+
+            # --- Custom Fields ---
+            # Helper to find a specific custom field value
+            def get_custom_field_value(field_name):
+                # Use XPath to find the Field element with the matching Name sub-element
+                field = user_element.find(f".//CustomFields/Field[Name='{field_name}']")
+                if field is not None:
+                    value_element = field.find('Value')
+                    if value_element is not None and value_element.get('nil') != 'true':
+                        return value_element.text
+                return None # Return None if field or value not found or is nil
+
+            user_info['title'] = get_custom_field_value('Title')
+            user_info['mobile_phone'] = get_custom_field_value('Mobile Phone')
+            user_info['anniversary_date'] = get_custom_field_value('Anniversary Date') # Corrected source
+            user_info['manager_name'] = get_custom_field_value('Manager Name')
+            user_info['birthday'] = get_custom_field_value('Birthday Month Day')
+            user_info['workstream'] = get_custom_field_value('Checkin Workstream')
+            # Add any other custom fields needed here using get_custom_field_value('FieldName')
             user_list.append(user_info)
 
         print(f"DEBUG: Found {len(user_list)} user(s) in TargetProcess.")
@@ -58,7 +76,6 @@ def _query_targetprocess_user(api_url):
         }
     except ET.ParseError as e:
         print(f"Error parsing TargetProcess XML response: {e}")
-        # Include part of the response text if possible for context
         error_context = response.text[:500] if 'response' in locals() else "N/A"
         print(f"DEBUG: Response Text (first 500 chars): {error_context}")
         return {
@@ -76,6 +93,8 @@ def _query_targetprocess_user(api_url):
         }
 
 # --- Tool Function Implementations ---
+
+# IMPORTANT: Update the API URLs in the functions below to include CustomFields
 
 def search_user_info_by_email(email: str):
     """
@@ -102,15 +121,12 @@ def search_user_info_by_email(email: str):
         username = email.split('@')[0]
         print(f"DEBUG: Extracted username '{username}' from email '{email}' for search.")
     else:
-        # If no '@' is present, maybe treat the whole input as the username?
-        # Or return an error? Let's assume treat as username for now.
         username = email
         print(f"DEBUG: Input '{email}' does not contain '@', searching using the full string.")
     # --- End extraction ---
 
-    # Construct the API URL using the extracted username part with 'contains'
-    # This assumes the username part is unique enough or the first result is desired.
-    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{username}')&access_token={tp_api_key}"
+    # Construct the API URL - ADD CustomFields to include parameter
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{username}')&access_token={tp_api_key}&include=[FirstName,LastName,Email,Id,Role,CustomFields[Name,Value]]" # Added CustomFields
 
     result = _query_targetprocess_user(api_url)
 
@@ -120,22 +136,17 @@ def search_user_info_by_email(email: str):
         print(f"User not found in TargetProcess for email containing '{username}' (from input '{email}')")
         return {
             "status": "failure_not_found",
-            # Modify reason slightly to reflect the search method
             "reason": f"No user found in TargetProcess with an email containing '{username}'.",
             "email_searched": email,
             "username_searched": username
         }
     else:
-        # Even searching by username might return multiple if emails share a prefix.
-        # However, for this function's intent (search by *email*), we likely still
-        # want the single most relevant result if possible.
-        # If multiple are returned, taking the first one is a common approach.
         user_data = result[0]
         print(f"Successfully found user matching email '{email}' (searched by username '{username}'): {user_data}")
         return {
             "status": "success",
             "message": f"User found matching email '{email}'.",
-            "data": user_data # Return the single user dictionary
+            "data": user_data
         }
 
 def search_user_info_by_name(first_name: str = None, last_name: str = None):
@@ -154,10 +165,8 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
             "error_details": "TP_API_KEY not set in environment."
         }
 
-    # Build the 'where' clause based on provided names
     where_clauses = []
     if first_name:
-        # Using 'contains' for flexibility, adjust to 'eq' if exact match needed
         where_clauses.append(f"(FirstName contains '{first_name}')")
     if last_name:
         where_clauses.append(f"(LastName contains '{last_name}')")
@@ -168,10 +177,10 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
             "reason": "At least a first name or last name must be provided for the search.",
         }
 
-    where_string = " and ".join(where_clauses) # Use AND if both are provided, OR might be too broad
+    where_string = " and ".join(where_clauses)
 
-    # Construct the API URL
-    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=({where_string})&access_token={tp_api_key}"
+    # Construct the API URL - ADD CustomFields to include parameter
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=({where_string})&access_token={tp_api_key}&include=[FirstName,LastName,Email,Id,Role,CustomFields[Name,Value]]" # Added CustomFields
 
     result = _query_targetprocess_user(api_url)
 
@@ -186,10 +195,8 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
             "name_searched": {"first_name": first_name, "last_name": last_name}
         }
     else:
-        # Return the list of users found
         search_term = f"{first_name or ''} {last_name or ''}".strip()
         print(f"Successfully found {len(result)} user(s) matching name '{search_term}': {result}")
-        # Decide on message based on number of results
         if len(result) == 1:
              message = f"Found 1 user matching the name '{search_term}'."
         else:
@@ -198,8 +205,5 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
         return {
             "status": "success",
             "message": message,
-            "data": result # Return the full list of user dictionaries
+            "data": result
         }
-
-# --- Remove other functions not defined in tools.json ---
-# Removed get_current_user_details as it wasn't in the provided tools.json 
