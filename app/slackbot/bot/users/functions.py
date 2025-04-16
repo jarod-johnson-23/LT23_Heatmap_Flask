@@ -97,8 +97,7 @@ def search_user_info_by_email(email: str):
              "reason": "Email parameter cannot be empty.",
          }
 
-    # Construct the API URL using the provided email argument (exact match)
-    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email eq '{email}')&access_token={tp_api_key}&include=[FirstName,LastName,Email,Id,CreateDate,Role]"
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=(Email contains '{email}')&access_token={tp_api_key}"
 
     result = _query_targetprocess_user(api_url)
 
@@ -154,7 +153,7 @@ def search_user_info_by_name(first_name: str = None, last_name: str = None):
     where_string = " and ".join(where_clauses) # Use AND if both are provided, OR might be too broad
 
     # Construct the API URL
-    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=({where_string})&access_token={tp_api_key}&include=[FirstName,LastName,Email,Id,CreateDate,Role]"
+    api_url = f"https://laneterralever.tpondemand.com/api/v1/Users?where=({where_string})&access_token={tp_api_key}"
 
     result = _query_targetprocess_user(api_url)
 
