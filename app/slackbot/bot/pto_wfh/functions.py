@@ -1,7 +1,7 @@
 import os
 import json
 import traceback
-from datetime import datetime
+from datetime import datetime, date
 from app.slackbot.database import get_targetprocess_id_by_slack_id # Import the new helper
 from app.slackbot.potenza import potenza_api # Import the Potenza API instance
 import re
@@ -462,13 +462,14 @@ def get_upcoming_wfh_by_name(name: str):
 def log_pto(slack_id: str, pto_entries: list):
     """
     Logs Paid Time Off (PTO) entries in TargetProcess for the user associated
-    with the given Slack ID.
+    with the given Slack ID. Ensures dates are always in the future.
 
     Args:
         slack_id: The Slack ID of the user logging PTO.
         pto_entries: A list of dictionaries, where each dictionary represents a PTO day
                      and must contain 'date' (YYYY-MM-DD string) and optionally
-                     'hours' (integer, defaults to 8).
+                     'hours' (integer, defaults to 8). The year in the date string
+                     will be adjusted to the nearest future occurrence.
 
     Returns:
         A dictionary containing the overall status and results for each entry.
@@ -529,21 +530,50 @@ def log_pto(slack_id: str, pto_entries: list):
     success_count = 0
     skipped_count = 0
     failed_count = 0
+    today = date.today() # Get today's date once
 
     for entry in pto_entries:
-        entry_date_str = entry.get('date')
+        original_date_str = entry.get('date') # Date string from LLM (might have wrong year)
         entry_hours = entry.get('hours', 8) # Default to 8 hours
-        entry_result = {"date": entry_date_str, "hours": entry_hours, "status": "pending"}
+        # Initialize result with the original date for reference if needed
+        entry_result = {"original_date_input": original_date_str, "hours": entry_hours, "status": "pending"}
 
-        # Validate date format and value
+        # --- Date Validation and Year Correction ---
         try:
-            pto_date = datetime.strptime(entry_date_str, '%Y-%m-%d').date()
-        except (ValueError, TypeError):
+            # Parse the date provided by the LLM
+            llm_date = datetime.strptime(original_date_str, '%Y-%m-%d').date()
+
+            # Determine the correct year
+            target_year = today.year
+            # If the month/day has already passed this year, use next year
+            if (llm_date.month, llm_date.day) < (today.month, today.day):
+                target_year += 1
+
+            # Construct the corrected date
+            corrected_date = date(target_year, llm_date.month, llm_date.day)
+            corrected_date_str = corrected_date.strftime('%Y-%m-%d')
+
+            # Ensure the corrected date is not in the past
+            if corrected_date < today:
+                 entry_result["status"] = "failed"
+                 entry_result["reason"] = f"Cannot log PTO for a past date ({corrected_date_str})."
+                 entry_result["corrected_date"] = corrected_date_str # Add corrected date for clarity
+                 failed_count += 1
+                 results.append(entry_result)
+                 print(f"DEBUG: Skipping past date {corrected_date_str} (original: {original_date_str})")
+                 continue
+
+            # Update entry_result with the corrected date
+            entry_result["date"] = corrected_date_str
+            print(f"DEBUG: Corrected date from '{original_date_str}' to '{corrected_date_str}'")
+
+        except (ValueError, TypeError) as e:
             entry_result["status"] = "failed"
-            entry_result["reason"] = f"Invalid date format: '{entry_date_str}'. Expected YYYY-MM-DD."
+            entry_result["reason"] = f"Invalid date format received: '{original_date_str}'. Expected YYYY-MM-DD. Error: {e}"
             failed_count += 1
             results.append(entry_result)
             continue
+        # --- End Date Validation ---
 
         # Validate hours
         if not isinstance(entry_hours, int) or entry_hours <= 0:
@@ -553,27 +583,27 @@ def log_pto(slack_id: str, pto_entries: list):
              results.append(entry_result)
              continue
 
-        # Check if weekend (Monday is 0, Sunday is 6)
-        if pto_date.weekday() >= 5: # Saturday or Sunday
+        # Check if weekend using the *corrected* date
+        if corrected_date.weekday() >= 5: # Saturday or Sunday
             entry_result["status"] = "skipped_weekend"
             entry_result["reason"] = "Date falls on a weekend."
             skipped_count += 1
             results.append(entry_result)
             continue
 
-        # Prepare API Payload
+        # Prepare API Payload using the *corrected* date string
         payload = {
             "Spent": entry_hours,
             "Remain": 0,
             "Description": "PTO [[logged via slack bot]]",
-            "Date": entry_date_str,
+            "Date": corrected_date_str, # Use corrected date
             "User": { "Id": targetprocess_id },
             "Assignable": { "Id": pto_story_id }
         }
 
         # Make API Call - Pass token in URL parameters
         try:
-            print(f"DEBUG: Logging PTO - Date: {entry_date_str}, Hours: {entry_hours}, User: {targetprocess_id}")
+            print(f"DEBUG: Logging PTO - Date: {corrected_date_str}, Hours: {entry_hours}, User: {targetprocess_id}")
             response = requests.post(
                 tp_api_url_base,
                 params={'access_token': tp_api_key},
@@ -586,7 +616,7 @@ def log_pto(slack_id: str, pto_entries: list):
             entry_result["status"] = "logged"
             entry_result["api_response"] = response.json()
             success_count += 1
-            print(f"DEBUG: Successfully logged PTO for {entry_date_str}")
+            print(f"DEBUG: Successfully logged PTO for {corrected_date_str}")
 
         except requests.exceptions.HTTPError as http_err:
             entry_result["status"] = "failed"
@@ -596,17 +626,17 @@ def log_pto(slack_id: str, pto_entries: list):
             entry_result["reason"] = f"API Error: {http_err}"
             entry_result["api_response"] = error_content
             failed_count += 1
-            logging.error(f"Failed to log PTO for {entry_date_str}. Status: {response.status_code}, Response: {error_content}")
+            logging.error(f"Failed to log PTO for {corrected_date_str}. Status: {response.status_code}, Response: {error_content}")
         except requests.exceptions.RequestException as req_err:
             entry_result["status"] = "failed"
             entry_result["reason"] = f"Network Error: {req_err}"
             failed_count += 1
-            logging.error(f"Network error logging PTO for {entry_date_str}: {req_err}")
+            logging.error(f"Network error logging PTO for {corrected_date_str}: {req_err}")
         except Exception as e:
             entry_result["status"] = "failed"
             entry_result["reason"] = f"Unexpected Error: {e}"
             failed_count += 1
-            logging.exception(f"Unexpected error logging PTO for {entry_date_str}")
+            logging.exception(f"Unexpected error logging PTO for {corrected_date_str}")
 
         results.append(entry_result)
 
