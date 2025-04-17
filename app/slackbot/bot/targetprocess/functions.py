@@ -1,7 +1,42 @@
 import traceback
-from datetime import datetime # <-- Import datetime for date parsing
+from datetime import datetime, date # Added date
 from app.slackbot.potenza import potenza_api # Import the Potenza API instance
 import re # Import regex for basic validation
+import requests # Added requests
+import os # Added os
+import logging # Added logging
+import json # Added json
+import sqlite3 # Added sqlite3
+
+# --- Database Helper ---
+# Assume your DB is in the project root or adjust path as needed
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'slack_bot.db') # Adjust path if needed
+
+def get_targetprocess_id_from_slack_id(slack_id: str) -> int | None:
+    """Looks up the targetprocess_id for a given slack_id in the local DB."""
+    targetprocess_id = None
+    conn = None # Initialize conn to None
+    try:
+        if not os.path.exists(DATABASE_PATH):
+             logging.error(f"Database file not found at: {DATABASE_PATH}")
+             return None
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT targetprocess_id FROM authenticated_users WHERE slack_id = ?", (slack_id,))
+        result = cursor.fetchone()
+        if result and result[0]:
+            targetprocess_id = int(result[0])
+            logging.info(f"Found targetprocess_id {targetprocess_id} for slack_id {slack_id}")
+        else:
+            logging.warning(f"No targetprocess_id found for slack_id {slack_id} in authenticated_users table.")
+    except sqlite3.Error as e:
+        logging.error(f"Database error while fetching targetprocess_id for slack_id {slack_id}: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error fetching targetprocess_id for slack_id {slack_id}: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return targetprocess_id
 
 # --- TargetProcess Functions ---
 
@@ -391,6 +426,192 @@ def get_latest_cycle_completion():
             "reason": "An error occurred while communicating with the data source for latest cycle completion.",
             "error_details": str(e)
         }
+
+def log_pto(slack_id: str, pto_entries: list):
+    """
+    Logs Paid Time Off (PTO) entries in TargetProcess for the user associated
+    with the given Slack ID.
+
+    Args:
+        slack_id: The Slack ID of the user logging PTO.
+        pto_entries: A list of dictionaries, where each dictionary represents a PTO day
+                     and must contain 'date' (YYYY-MM-DD string) and optionally
+                     'hours' (integer, defaults to 8).
+
+    Returns:
+        A dictionary containing the overall status and results for each entry.
+    """
+    print(f"Executing log_pto for Slack ID: {slack_id} with {len(pto_entries)} entries.")
+
+    # --- Input Validation ---
+    if not slack_id or not isinstance(slack_id, str):
+         return {"status": "failure_invalid_input", "reason": "Invalid Slack ID provided internally."} # Should not happen if framework passes it
+    if not pto_entries or not isinstance(pto_entries, list):
+        return {"status": "failure_invalid_input", "reason": "Invalid format for PTO entries (must be a list)."}
+
+    # --- Get TargetProcess ID from Slack ID ---
+    targetprocess_id = get_targetprocess_id_from_slack_id(slack_id)
+    if not targetprocess_id:
+        logging.warning(f"Could not find TargetProcess ID for Slack user {slack_id}.")
+        return {
+            "status": "failure_tool_error", # Or a more specific status like 'failure_user_not_linked'
+            "reason": "Could not find a linked TargetProcess account for your Slack ID. Please ensure you have authenticated.",
+            "error_details": f"No targetprocess_id found for slack_id {slack_id} in local DB."
+        }
+    print(f"DEBUG: Found TargetProcess ID {targetprocess_id} for Slack ID {slack_id}")
+
+    # --- Get PTO Story ID from Cache ---
+    special_entities = potenza_api.get_special_entities_cache()
+    pto_story_id = None
+    for entity in special_entities:
+        if entity.get('entity_nicname') == 'PTO_STORY':
+            pto_story_id = entity.get('entity_id')
+            break
+
+    if not pto_story_id:
+        logging.error("Could not find entity_id for PTO_STORY in special_entities cache.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: Could not find the PTO story ID.",
+            "error_details": "PTO_STORY entity_id missing from special_entities cache."
+        }
+    print(f"DEBUG: Found PTO Story ID: {pto_story_id}")
+
+    # --- Get TargetProcess API Key ---
+    tp_api_key = os.getenv("TP_API_KEY")
+    if not tp_api_key:
+        logging.error("TP_API_KEY environment variable not set.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: TargetProcess API key is missing.",
+            "error_details": "TP_API_KEY environment variable not set."
+        }
+
+    # --- Process Each Entry ---
+    results = []
+    # Construct base URL without token
+    tp_api_url_base = "https://laneterralever.tpondemand.com/api/v1/times"
+    # Define headers *without* Authorization
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+    success_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for entry in pto_entries:
+        entry_date_str = entry.get('date')
+        entry_hours = entry.get('hours', 8) # Default to 8 hours
+        entry_result = {"date": entry_date_str, "hours": entry_hours, "status": "pending"}
+
+        # Validate date format and value
+        try:
+            pto_date = datetime.strptime(entry_date_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Invalid date format: '{entry_date_str}'. Expected YYYY-MM-DD."
+            failed_count += 1
+            results.append(entry_result)
+            continue
+
+        # Validate hours
+        if not isinstance(entry_hours, int) or entry_hours <= 0:
+             entry_result["status"] = "failed"
+             entry_result["reason"] = f"Invalid hours value: '{entry_hours}'. Expected a positive integer."
+             failed_count += 1
+             results.append(entry_result)
+             continue
+
+        # Check if weekend (Monday is 0, Sunday is 6)
+        if pto_date.weekday() >= 5: # Saturday or Sunday
+            entry_result["status"] = "skipped_weekend"
+            entry_result["reason"] = "Date falls on a weekend."
+            skipped_count += 1
+            results.append(entry_result)
+            continue
+
+        # Prepare API Payload
+        payload = {
+            "Spent": entry_hours,
+            "Remain": 0,
+            "Description": "PTO [[logged via slack bot]]",
+            "Date": entry_date_str, # Use the validated string
+            "User": {
+                "Id": targetprocess_id
+            },
+            "Assignable": {
+                "Id": pto_story_id
+            }
+        }
+
+        # Make API Call - Pass token in URL parameters
+        try:
+            print(f"DEBUG: Logging PTO - Date: {entry_date_str}, Hours: {entry_hours}, User: {targetprocess_id}")
+            # Add access_token as a query parameter
+            response = requests.post(
+                tp_api_url_base, # Use the base URL
+                params={'access_token': tp_api_key}, # <-- Pass token here
+                headers=headers, # Headers without Authorization
+                json=payload,
+                timeout=20
+            )
+            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+            # Check response content if needed, assume 2xx means success for now
+            entry_result["status"] = "logged"
+            entry_result["api_response"] = response.json() # Store response if needed
+            success_count += 1
+            print(f"DEBUG: Successfully logged PTO for {entry_date_str}")
+
+        except requests.exceptions.HTTPError as http_err:
+            entry_result["status"] = "failed"
+            error_content = "No details available"
+            try:
+                error_content = response.json() # Try to get JSON error details
+            except json.JSONDecodeError:
+                error_content = response.text # Otherwise get raw text
+            entry_result["reason"] = f"API Error: {http_err}"
+            entry_result["api_response"] = error_content
+            failed_count += 1
+            logging.error(f"Failed to log PTO for {entry_date_str}. Status: {response.status_code}, Response: {error_content}")
+
+        except requests.exceptions.RequestException as req_err:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Network Error: {req_err}"
+            failed_count += 1
+            logging.error(f"Network error logging PTO for {entry_date_str}: {req_err}")
+
+        except Exception as e:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Unexpected Error: {e}"
+            failed_count += 1
+            logging.exception(f"Unexpected error logging PTO for {entry_date_str}")
+
+        results.append(entry_result)
+
+    # --- Determine Overall Status and Message ---
+    overall_status = "success"
+    if failed_count > 0 and success_count == 0 and skipped_count == 0:
+        overall_status = "failure_tool_error" # All failed
+    elif failed_count > 0:
+        overall_status = "partial_success" # Some failed
+
+    message = f"PTO logging complete. Logged: {success_count}, Skipped (weekend): {skipped_count}, Failed: {failed_count}."
+    if overall_status == "failure_tool_error":
+         message = f"PTO logging failed for all {failed_count} entries."
+    elif overall_status == "partial_success":
+         message = f"PTO logging partially successful. Logged: {success_count}, Skipped (weekend): {skipped_count}, Failed: {failed_count}."
+
+
+    print(f"DEBUG: {message}")
+    return {
+        "status": overall_status,
+        "message": message,
+        "data": {
+            "results": results
+        }
+    }
 
 # --- Add other TargetProcess functions below ---
 # e.g., get_story_details, get_project_info, etc.

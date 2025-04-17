@@ -4,6 +4,14 @@ import json
 import time
 import re
 from datetime import datetime, timedelta
+import threading
+import atexit
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class PotenzaAPI:
     """
@@ -23,6 +31,27 @@ class PotenzaAPI:
         
         if not self.email or not self.password:
             print("WARNING: Potenza API credentials not found in environment variables")
+        
+        self._special_entities_cache = None
+        self._cache_lock = threading.Lock()
+        self.scheduler = BackgroundScheduler(daemon=True)
+
+        logging.info("Initializing PotenzaAPI and performing initial special entities fetch.")
+        self._fetch_and_cache_special_entities()
+
+        try:
+            self.scheduler.add_job(
+                self._fetch_and_cache_special_entities,
+                trigger=CronTrigger(hour=9, minute=0, timezone='UTC'),
+                id='refresh_special_entities',
+                name='Daily Special Entities Refresh',
+                replace_existing=True
+            )
+            self.scheduler.start()
+            logging.info("Scheduled daily refresh of special entities cache for 09:00 UTC.")
+            atexit.register(self._shutdown_scheduler)
+        except Exception as e:
+            logging.exception("Failed to start or schedule the special entities refresh job.")
     
     def _is_token_valid(self):
         """Check if the current auth token is still valid."""
@@ -209,6 +238,47 @@ class PotenzaAPI:
         except Exception as e:
             print(f"Error parsing custom format: {str(e)}")
             return {"error": f"Failed to parse custom format: {str(e)}", "raw_data": data_str}
+
+    def _fetch_and_cache_special_entities(self):
+        """Fetches special entities from Potenza and updates the cache."""
+        logging.info("Attempting to fetch and cache special entities...")
+        sql_query = "SELECT * from special_entities"
+        try:
+            result = self.execute_sql(sql_query)
+
+            if isinstance(result, list):
+                with self._cache_lock:
+                    self._special_entities_cache = result
+                logging.info(f"Successfully fetched and cached {len(result)} special entities.")
+            elif isinstance(result, dict) and result.get('status', '').startswith('failure'):
+                logging.error(f"Failed to fetch special entities. Potenza API returned error: {result.get('reason', 'Unknown error')}")
+            else:
+                logging.error(f"Failed to fetch special entities. Potenza API returned unexpected data type: {type(result)}")
+
+        except Exception as e:
+            logging.exception("Exception occurred during _fetch_and_cache_special_entities.")
+
+    def get_special_entities_cache(self):
+        """
+        Returns a copy of the cached special entities list.
+
+        Returns:
+            list: A copy of the cached list of special entities, or an empty list if
+                  the cache is not populated or an error occurred during fetch.
+        """
+        with self._cache_lock:
+            if self._special_entities_cache is not None:
+                return list(self._special_entities_cache)
+            else:
+                logging.warning("Special entities cache accessed before successful initialization or after fetch failure.")
+                return []
+
+    def _shutdown_scheduler(self):
+        """Shuts down the APScheduler."""
+        logging.info("Shutting down PotenzaAPI scheduler...")
+        if self.scheduler.running:
+            self.scheduler.shutdown()
+            logging.info("PotenzaAPI scheduler shut down.")
 
 # Create a singleton instance for use throughout the application
 potenza_api = PotenzaAPI()
