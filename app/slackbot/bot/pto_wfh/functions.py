@@ -575,7 +575,7 @@ def log_time_entry(slack_id: str, time_type: str, entries: list):
     print(f"DEBUG: Found TargetProcess ID {targetprocess_id} for Slack ID {slack_id}")
 
     # --- Get Story ID ---
-    story_nicname_map = {"PTO": "PTO_STORY", "WFH": "WFH_STORY", "Sick": "SICK_STORY"}
+    story_nicname_map = {"PTO": "PTO_STORY", "WFH": "WORK_FROM_HOME_STORY", "Sick": "SICK_STORY"}
     story_nicname = story_nicname_map.get(time_type)
     special_entities = potenza_api.get_special_entities_cache()
     story_id = None
