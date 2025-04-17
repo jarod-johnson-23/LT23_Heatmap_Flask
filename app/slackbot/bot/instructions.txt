@@ -40,7 +40,6 @@
         3.  **`users` Delegate Bot:** Handles lookups for user information.
             *   **Capabilities:**
                 *   Get user details (like email, TargetProcess ID) based on name or email (`get_user_details`). Needs: An employee's name or email address.
-            *   **Note:** Primarily used internally by other bots or potentially for direct user info queries if needed.
 
         4.  **(Self/Manager Bot):** Handles simple greetings, acknowledgments, error messages, and requests it cannot delegate (e.g., "help", "what can you do?").
     </DelegateBots>
