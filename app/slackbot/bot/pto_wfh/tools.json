@@ -63,5 +63,37 @@
       "required": ["name"],
       "additionalProperties": false
     }
+  },
+  {
+    "type": "function",
+    "name": "log_pto",
+    "description": "Logs Paid Time Off (PTO) entries in TargetProcess for the requesting user. The function uses the user's Slack ID to find their TargetProcess ID. The LLM MUST parse the user's request (e.g., 'log PTO for next Monday', 'log PTO July 1-5', 'log 4 hours PTO tomorrow') and construct the 'pto_entries' array. Each entry in the array MUST represent a single day with its date in 'YYYY-MM-DD' format. Expand date ranges into individual day entries. If hours are not specified, default to 8.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pto_entries": {
+          "type": "array",
+          "description": "An array of objects, each representing a single day of PTO to log. Each object MUST contain a 'date' (string, YYYY-MM-DD format) and MAY contain 'hours' (integer, defaults to 8 if omitted). Example: [{'date': '2024-07-29', 'hours': 8}, {'date': '2024-07-30'}]",
+          "items": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string",
+                "description": "The specific date for the PTO entry, formatted strictly as YYYY-MM-DD.",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "hours": {
+                "type": "integer",
+                "description": "The number of hours for the PTO entry on this date. Defaults to 8 if not provided.",
+                "minimum": 1
+              }
+            },
+            "required": ["date"]
+          }
+        }
+      },
+      "required": ["pto_entries"],
+      "additionalProperties": false
+    }
   }
 ]
