@@ -10,6 +10,26 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import logging
 
+# --- Set TZ environment variable programmatically ---
+# Set TZ to UTC to resolve ambiguity before APScheduler/zoneinfo tries to guess.
+# This affects the current Python process only.
+# Check if TZ is already set, otherwise default to UTC.
+tz_to_set = os.environ.get('TZ', 'UTC')
+if 'TZ' not in os.environ or os.environ['TZ'] != tz_to_set:
+    os.environ['TZ'] = tz_to_set
+    # time.tzset() re-initializes time conversion routines based on TZ (Unix-like specific)
+    if hasattr(time, 'tzset'):
+        try:
+            time.tzset()
+            logging.info(f"Programmatically set TZ environment variable to '{tz_to_set}' and called time.tzset() for this process.")
+        except Exception as e:
+            # Catch potential errors if tzset fails unexpectedly
+            logging.error(f"Error calling time.tzset() after setting TZ='{tz_to_set}': {e}")
+    else:
+         logging.info(f"Programmatically set TZ environment variable to '{tz_to_set}' for this process (time.tzset not available).")
+else:
+    logging.info(f"TZ environment variable already set to: {os.environ['TZ']}")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
