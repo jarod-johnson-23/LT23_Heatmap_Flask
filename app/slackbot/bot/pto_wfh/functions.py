@@ -1,51 +1,23 @@
 import os
 import json
 import traceback
-from datetime import datetime # <-- Import datetime
+from datetime import datetime
 from app.slackbot.database import get_targetprocess_id_by_slack_id # Import the new helper
 from app.slackbot.potenza import potenza_api # Import the Potenza API instance
 import re
 import requests
 import logging
 import sqlite3
-from typing import Union # <-- Import Union
+from typing import Union
 
 # Configure logging if not already done in this module scope
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Database Helper ---
 # Assume your DB is in the project root or adjust path as needed
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'slack_bot.db') # Adjust path if needed
-
-# Use Union for Python 3.9 compatibility
-def get_targetprocess_id_from_slack_id(slack_id: str) -> Union[int, None]:
-    """Looks up the targetprocess_id for a given slack_id in the local DB."""
-    targetprocess_id = None
-    conn = None # Initialize conn to None
-    try:
-        if not os.path.exists(DATABASE_PATH):
-             logging.error(f"Database file not found at: {DATABASE_PATH}")
-             return None
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT targetprocess_id FROM authenticated_users WHERE slack_id = ?", (slack_id,))
-        result = cursor.fetchone()
-        if result and result[0]:
-            targetprocess_id = int(result[0])
-            logging.info(f"Found targetprocess_id {targetprocess_id} for slack_id {slack_id}")
-        else:
-            logging.warning(f"No targetprocess_id found for slack_id {slack_id} in authenticated_users table.")
-    except sqlite3.Error as e:
-        logging.error(f"Database error while fetching targetprocess_id for slack_id {slack_id}: {e}")
-    except Exception as e:
-        logging.error(f"Unexpected error fetching targetprocess_id for slack_id {slack_id}: {e}")
-    finally:
-        if conn:
-            conn.close()
-    return targetprocess_id
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data/conversations.db') # Adjust path if needed
 
 # --- PTO/WFH Functions ---
-
 def get_pto_balance(slack_id: str):
     """
     Retrieves the current PTO balance details for the user associated with the given slack_id.
@@ -59,7 +31,7 @@ def get_pto_balance(slack_id: str):
     print(f"Executing get_pto_balance for slack_id: {slack_id}")
 
     # 1. Get TargetProcess ID from SQLite DB using slack_id
-    targetprocess_id = get_targetprocess_id_from_slack_id(slack_id)
+    targetprocess_id = get_targetprocess_id_by_slack_id(slack_id)
 
     if targetprocess_id is None:
         print(f"ERROR: Could not find targetprocess_id for slack_id {slack_id} in local database.")
@@ -510,7 +482,7 @@ def log_pto(slack_id: str, pto_entries: list):
         return {"status": "failure_invalid_input", "reason": "Invalid format for PTO entries (must be a list)."}
 
     # --- Get TargetProcess ID from Slack ID ---
-    targetprocess_id = get_targetprocess_id_from_slack_id(slack_id)
+    targetprocess_id = get_targetprocess_id_by_slack_id(slack_id)
     if not targetprocess_id:
         logging.warning(f"Could not find TargetProcess ID for Slack user {slack_id}.")
         return {
