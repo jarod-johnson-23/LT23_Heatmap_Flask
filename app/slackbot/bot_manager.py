@@ -308,7 +308,9 @@ class BotManager:
 
             instructions = self._load_instructions(sub_bot["instructions_path"])
             tools = self._load_tools(sub_bot["tools_path"])
-            personalized_instructions = f"{instructions}\n\nYou are processing a task for {user_email}."
+
+            current_date = datetime.now().strftime('%Y-%m-%d')
+            personalized_instructions = f"{instructions}\n\nYou are processing a task for {user_email}. The current date is {current_date}."
 
             print(f"DEBUG: Calling Sub-Bot '{bot_name}' (Model: {self.model}) with message: '{message}' and slack_id: {slack_id}")
             # Initial call to the sub-bot

@@ -789,7 +789,7 @@ def log_wfh(slack_id: str, wfh_entries: list):
         payload = {
             "Spent": 0, # Always 0 for WFH time entries
             "Remain": 0,
-            "Description": f"WFH ({entry_hours}h requested) [[logged via slack bot]]", # Optionally include requested hours in description
+            "Description": f"WFH [[logged via slack bot]]", # Optionally include requested hours in description
             "Date": corrected_date_str,
             "User": { "Id": targetprocess_id },
             "Assignable": { "Id": wfh_story_id }
@@ -985,7 +985,7 @@ def log_sick(slack_id: str, sick_entries: list):
         payload = {
             "Spent": entry_hours, # Use provided hours for Sick Time
             "Remain": 0,
-            "Description": "Sick Time [[logged via slack bot]]",
+            "Description": "SICK [[logged via slack bot]]",
             "Date": corrected_date_str,
             "User": { "Id": targetprocess_id },
             "Assignable": { "Id": sick_story_id }
