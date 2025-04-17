@@ -1010,7 +1010,7 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
     # --- Fetch Existing Entries for the User on this Story ---
     fetch_api_url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userStories"
     fetch_params = {
-        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(user.id={targetprocess_id})}}',
+        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(id={targetprocess_id})}}',
         'where': f'(Id={story_id})',
         'access_token': tp_api_key
     }
@@ -1197,7 +1197,7 @@ def fetch_existing_times(targetprocess_id: int, story_id: int, time_type: str, t
     fetch_api_url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userStories"
     fetch_params = {
          # REVERTED Human Edit: Filter times by user.id, not time entry id
-        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(user.id={targetprocess_id})}}',
+        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(id={targetprocess_id})}}',
         'where': f'(Id={story_id})',
         'access_token': tp_api_key
     }
