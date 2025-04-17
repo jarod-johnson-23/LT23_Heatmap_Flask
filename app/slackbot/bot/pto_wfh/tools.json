@@ -159,5 +159,26 @@
       "required": ["sick_entries"],
       "additionalProperties": false
     }
+  },
+  {
+    "type": "function",
+    "name": "delete_pto",
+    "description": "Finds existing Paid Time Off (PTO) time entries logged in TargetProcess for the requesting user on specific dates. It identifies the internal 'timeId' needed for deletion but DOES NOT perform the deletion itself. The LLM MUST parse the user's request (e.g., 'delete my PTO for next Monday', 'remove PTO July 1-2') and construct the 'dates_to_delete' array. Each entry MUST be a single date string in 'YYYY-MM-DD' format. Expand date ranges.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dates_to_delete": {
+          "type": "array",
+          "description": "An array of date strings, each representing a single day of PTO to find for potential deletion. Each date MUST be formatted strictly as YYYY-MM-DD. Example: ['2024-07-29', '2024-07-30']",
+          "items": {
+            "type": "string",
+            "description": "A specific date for which to find a PTO entry, formatted strictly as YYYY-MM-DD.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        }
+      },
+      "required": ["dates_to_delete"],
+      "additionalProperties": false
+    }
   }
 ]

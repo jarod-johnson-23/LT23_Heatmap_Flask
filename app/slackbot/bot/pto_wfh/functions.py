@@ -1,14 +1,14 @@
 import os
 import json
 import traceback
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from app.slackbot.database import get_targetprocess_id_by_slack_id # Import the new helper
 from app.slackbot.potenza import potenza_api # Import the Potenza API instance
 import re
 import requests
 import logging
 import sqlite3
-from typing import Union
+from typing import Union, Optional
 
 # Configure logging if not already done in this module scope
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,6 +16,29 @@ from typing import Union
 # --- Database Helper ---
 # Assume your DB is in the project root or adjust path as needed
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data/conversations.db') # Adjust path if needed
+
+# --- Helper Function for Parsing TargetProcess Date Strings ---
+def parse_tp_date(tp_date_str: Optional[str]) -> Optional[date]:
+    """
+    Parses TargetProcess's /Date(milliseconds-offset)/ format into a date object.
+    Returns None if parsing fails or input is None.
+    """
+    if not tp_date_str:
+        return None
+    match = re.match(r"/Date\((\d+)(?:[+-]\d+)?\)/", tp_date_str)
+    if match:
+        milliseconds = int(match.group(1))
+        try:
+            # Convert milliseconds to seconds and create a datetime object in UTC
+            dt_utc = datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc)
+            # Return just the date part
+            return dt_utc.date()
+        except (ValueError, OSError) as e:
+            logging.error(f"Error converting timestamp {milliseconds} to date: {e}")
+            return None
+    else:
+        logging.warning(f"Could not parse TargetProcess date string: {tp_date_str}")
+        return None
 
 # --- PTO/WFH Functions ---
 def get_pto_balance(slack_id: str):
@@ -1049,5 +1072,171 @@ def log_sick(slack_id: str, sick_entries: list):
         "message": message,
         "data": { "results": results }
     }
+
+def delete_pto(slack_id: str, dates_to_delete: list):
+    """
+    Finds existing PTO time entries for specific dates for the requesting user.
+    Does NOT actually delete them yet, but returns the time IDs that would be deleted.
+
+    Args:
+        slack_id: The Slack ID of the user requesting the deletion.
+        dates_to_delete: A list of date strings (YYYY-MM-DD) for which to find PTO entries.
+
+    Returns:
+        A dictionary containing the status and a list of time entries identified for deletion.
+    """
+    print(f"Executing delete_pto for Slack ID: {slack_id} with dates: {dates_to_delete}")
+
+    # --- Input Validation ---
+    if not slack_id or not isinstance(slack_id, str):
+        return {"status": "failure_invalid_input", "reason": "Invalid Slack ID provided internally."}
+    if not dates_to_delete or not isinstance(dates_to_delete, list):
+        return {"status": "failure_invalid_input", "reason": "Invalid format for dates to delete (must be a list)."}
+
+    valid_dates_to_delete = []
+    for date_str in dates_to_delete:
+        try:
+            valid_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            valid_dates_to_delete.append(valid_date)
+        except (ValueError, TypeError):
+            return {"status": "failure_invalid_input", "reason": f"Invalid date format in list: '{date_str}'. Expected YYYY-MM-DD."}
+
+    if not valid_dates_to_delete:
+         return {"status": "failure_invalid_input", "reason": "No valid dates provided for deletion."}
+
+    # --- Get TargetProcess ID from Slack ID ---
+    targetprocess_id = get_targetprocess_id_by_slack_id(slack_id)
+    if not targetprocess_id:
+        logging.warning(f"Could not find TargetProcess ID for Slack user {slack_id}.")
+        return {
+            "status": "failure_user_not_linked",
+            "reason": "Could not find a linked TargetProcess account for your Slack ID.",
+            "error_details": f"No targetprocess_id found for slack_id {slack_id} in local DB."
+        }
+    print(f"DEBUG: Found TargetProcess ID {targetprocess_id} for Slack ID {slack_id}")
+
+    # --- Get PTO Story ID from Cache ---
+    special_entities = potenza_api.get_special_entities_cache()
+    pto_story_id = None
+    for entity in special_entities:
+        if entity.get('entity_nicname') == 'PTO_STORY':
+            pto_story_id = entity.get('entity_id')
+            break
+
+    if not pto_story_id:
+        logging.error("Could not find entity_id for PTO_STORY in special_entities cache.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: Could not find the PTO story ID.",
+            "error_details": "PTO_STORY entity_id missing from special_entities cache."
+        }
+    print(f"DEBUG: Found PTO Story ID: {pto_story_id}")
+
+    # --- Get TargetProcess API Key ---
+    tp_api_key = os.getenv("TP_API_KEY")
+    if not tp_api_key:
+        logging.error("TP_API_KEY environment variable not set.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: TargetProcess API key is missing.",
+            "error_details": "TP_API_KEY environment variable not set."
+        }
+
+    # --- Fetch Existing Time Entries ---
+    api_url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userStories"
+    # Note: The select syntax might need adjustment based on exact APIv2 capabilities.
+    # This assumes we can filter times within the select clause for the specific user.
+    params = {
+        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(user.id={targetprocess_id})}}',
+        'where': f'(Id={pto_story_id})',
+        'access_token': tp_api_key
+    }
+    headers = {'Accept': 'application/json'}
+    existing_times = []
+
+    try:
+        print(f"DEBUG: Fetching existing PTO times for user {targetprocess_id} on story {pto_story_id}")
+        response = requests.get(api_url, params=params, headers=headers, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        # Check response structure
+        if not data or 'items' not in data or not isinstance(data['items'], list) or len(data['items']) == 0:
+             print(f"DEBUG: No existing time entries found for user {targetprocess_id} on PTO story {pto_story_id} or unexpected API response structure.")
+             # This isn't necessarily an error, just means no PTO logged on this story for the user
+        elif 'times' in data['items'][0] and isinstance(data['items'][0]['times'], list):
+             existing_times = data['items'][0]['times']
+             print(f"DEBUG: Found {len(existing_times)} existing time entries.")
+        else:
+             print(f"WARNING: Unexpected structure in API response 'items': {data['items'][0]}")
+
+
+    except requests.exceptions.HTTPError as http_err:
+        logging.error(f"HTTP error fetching PTO times: {http_err}. Response: {response.text}")
+        return {
+            "status": "failure_tool_error",
+            "reason": f"API Error fetching existing PTO: {http_err}",
+            "error_details": response.text[:500] # Limit error detail length
+        }
+    except requests.exceptions.RequestException as req_err:
+        logging.error(f"Network error fetching PTO times: {req_err}")
+        return {
+            "status": "failure_tool_error",
+            "reason": f"Network Error fetching existing PTO: {req_err}"
+        }
+    except json.JSONDecodeError as json_err:
+         logging.error(f"Error decoding API response: {json_err}. Response text: {response.text}")
+         return {
+             "status": "failure_tool_error",
+             "reason": "Error decoding response from TargetProcess API.",
+             "error_details": response.text[:500]
+         }
+    except Exception as e:
+        logging.exception("Unexpected error fetching PTO times")
+        return {
+            "status": "failure_tool_error",
+            "reason": f"An unexpected error occurred: {e}"
+        }
+
+    # --- Find Matching Time IDs ---
+    items_to_delete = []
+    found_count = 0
+    not_found_dates = list(valid_dates_to_delete) # Copy list to track misses
+
+    for time_entry in existing_times:
+        entry_date = parse_tp_date(time_entry.get('date'))
+        time_id = time_entry.get('timeId')
+        spent = time_entry.get('spent')
+
+        if entry_date and time_id and entry_date in valid_dates_to_delete:
+            items_to_delete.append({
+                "date": entry_date.strftime('%Y-%m-%d'),
+                "timeId": time_id,
+                "hours": spent # Include hours for context
+            })
+            found_count += 1
+            if entry_date in not_found_dates:
+                not_found_dates.remove(entry_date) # Mark as found
+
+    # --- Format Response ---
+    if not items_to_delete:
+        message = f"No existing PTO entries found for the specified date(s): {', '.join(d.strftime('%Y-%m-%d') for d in valid_dates_to_delete)}."
+        print(f"DEBUG: {message}")
+        return {
+            "status": "failure_not_found", # Use specific status
+            "reason": message
+        }
+    else:
+        message = f"Identified {found_count} PTO entry/entries to delete."
+        if not_found_dates:
+            message += f" Could not find entries for: {', '.join(d.strftime('%Y-%m-%d') for d in not_found_dates)}."
+        print(f"DEBUG: {message}")
+        return {
+            "status": "success", # Indicate success in finding entries
+            "message": message,
+            "data": {
+                "items_to_delete": items_to_delete # List of {'date': ..., 'timeId': ..., 'hours': ...}
+            }
+        }
 
 
