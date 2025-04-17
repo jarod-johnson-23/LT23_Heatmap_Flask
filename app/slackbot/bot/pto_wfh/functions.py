@@ -8,6 +8,7 @@ import re
 import requests
 import logging
 import sqlite3
+from typing import Union # <-- Import Union
 
 # Configure logging if not already done in this module scope
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,7 +17,8 @@ import sqlite3
 # Assume your DB is in the project root or adjust path as needed
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'slack_bot.db') # Adjust path if needed
 
-def get_targetprocess_id_from_slack_id(slack_id: str) -> int | None:
+# Use Union for Python 3.9 compatibility
+def get_targetprocess_id_from_slack_id(slack_id: str) -> Union[int, None]:
     """Looks up the targetprocess_id for a given slack_id in the local DB."""
     targetprocess_id = None
     conn = None # Initialize conn to None
@@ -57,7 +59,7 @@ def get_pto_balance(slack_id: str):
     print(f"Executing get_pto_balance for slack_id: {slack_id}")
 
     # 1. Get TargetProcess ID from SQLite DB using slack_id
-    targetprocess_id = get_targetprocess_id_by_slack_id(slack_id)
+    targetprocess_id = get_targetprocess_id_from_slack_id(slack_id)
 
     if targetprocess_id is None:
         print(f"ERROR: Could not find targetprocess_id for slack_id {slack_id} in local database.")
