@@ -1008,10 +1008,9 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
         }
 
     # --- Fetch Existing Entries for the User on this Story ---
-    # Fetch all relevant time entries for the user on this story once
     fetch_api_url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userStories"
     fetch_params = {
-        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(id={targetprocess_id})}}',
+        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(user.id={targetprocess_id})}}',
         'where': f'(Id={story_id})',
         'access_token': tp_api_key
     }
@@ -1025,14 +1024,13 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
         data = response.json()
 
         if data and 'items' in data and data['items'] and 'times' in data['items'][0]:
-            for time_entry in data['items'][0]['times']:
-                entry_date = parse_tp_date(time_entry.get('date'))
+            for time_entry_dict in data['items'][0]['times']:
+                entry_date = parse_tp_date(time_entry_dict.get('date'))
                 if entry_date:
                     if entry_date in existing_times:
-                        # Handle multiple entries on the same day - keep the first one found for now
                         logging.warning(f"Multiple {time_type} entries found for user {targetprocess_id} on {entry_date}. Using the first one found (TimeID: {existing_times[entry_date]['timeId']}).")
                     else:
-                        existing_times[entry_date] = time_entry
+                        existing_times[entry_date] = time_entry_dict
         print(f"DEBUG: Found {len(existing_times)} existing {time_type} entries for user {targetprocess_id}.")
 
     except requests.exceptions.RequestException as req_err:
@@ -1054,7 +1052,7 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
         original_date_obj = update_data["original_date_obj"]
         original_date_str = update_data["original_date_str"]
         new_date = update_data["new_date"]
-        new_hours = update_data["new_hours"] # Use the correct hours
+        new_hours = update_data["new_hours"]
 
         result_details = {"original_date": original_date_str}
         if new_date: result_details["requested_new_date"] = new_date
@@ -1064,20 +1062,12 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
         time_id_to_update = None
         original_tp_date_str = None
         original_spent = None
-        found_entry = None
-
-        for time_entry in existing_times:
-            entry_date = parse_tp_date(time_entry.get('date'))
-            if entry_date == original_date_obj:
-                if found_entry:
-                    logging.warning(f"Multiple {time_type} entries found for user {targetprocess_id} on {original_date_str}. Updating the first one found (TimeID: {found_entry['timeId']}).")
-                    break
-                found_entry = time_entry
+        found_entry = existing_times.get(original_date_obj)
 
         if found_entry:
             time_id_to_update = found_entry.get('timeId')
             original_spent = found_entry.get('spent')
-            original_tp_date_str = found_entry.get('date') # Keep the original TP format if date isn't changing
+            original_tp_date_str = found_entry.get('date')
             result_details["timeId"] = time_id_to_update
             print(f"DEBUG: Found matching entry to update for {original_date_str}. TimeID: {time_id_to_update}, Original Spent: {original_spent}")
         else:
@@ -1093,14 +1083,14 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
         change_detected = False
 
         # Check if new_date is provided and different from original
-        if new_date and new_date != original_date_str:
+        if new_date and new_date != original_date_obj.strftime('%Y-%m-%d'):
             update_payload["Date"] = new_date
             update_description_parts.append(f"date to {new_date}")
             change_detected = True
 
         # Check if new_hours is provided and different from original
-        if new_hours is not None and float(new_hours) != original_spent: # Compare float hours
-            update_payload["Spent"] = float(new_hours) # Use the correct hours
+        if new_hours is not None and float(new_hours) != original_spent:
+            update_payload["Spent"] = float(new_hours)
             update_description_parts.append(f"hours to {new_hours}")
             change_detected = True
 
@@ -1189,5 +1179,53 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
             "no_change_updates": no_change_updates
         }
     }
+
+# --- Helper to Fetch Existing Times (Used by Delete/Update) ---
+# NOTE: This helper is currently ONLY used by delete_time_entry.
+# update_time_entry fetches directly. Consider refactoring update_time_entry
+# to use this helper for consistency if desired, but the fix above works without it.
+def fetch_existing_times(targetprocess_id: int, story_id: int, time_type: str, tp_api_key: str) -> Optional[list]:
+    """
+    Fetches existing time entries for a specific user on a specific story.
+
+    Returns:
+        A list of time entry dictionaries, or None if an error occurs.
+        Each dictionary contains 'timeId', 'spent', 'date' (original TP string), 'parsed_date'.
+    """
+    # ... (API key check) ...
+
+    fetch_api_url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userStories"
+    fetch_params = {
+         # REVERTED Human Edit: Filter times by user.id, not time entry id
+        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(user.id={targetprocess_id})}}',
+        'where': f'(Id={story_id})',
+        'access_token': tp_api_key
+    }
+    headers = {'Accept': 'application/json'}
+    fetched_times = [] # Return a list
+
+    try:
+        print(f"DEBUG [fetch_existing_times]: Fetching {time_type} times for user {targetprocess_id} on story {story_id}")
+        response = requests.get(fetch_api_url, params=fetch_params, headers=headers, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        if data and 'items' in data and data['items'] and 'times' in data['items'][0]:
+            for time_entry in data['items'][0]['times']:
+                parsed_dt = parse_tp_date(time_entry.get('date'))
+                if parsed_dt:
+                    time_entry['parsed_date'] = parsed_dt # Add parsed date to the dict
+                    fetched_times.append(time_entry)
+                else:
+                    logging.warning(f"Could not parse date for time entry: {time_entry}")
+        print(f"DEBUG [fetch_existing_times]: Found {len(fetched_times)} entries.")
+        return fetched_times # Return the list
+
+    except requests.exceptions.RequestException as req_err:
+        logging.error(f"Network error in fetch_existing_times: {req_err}")
+        return None # Indicate error by returning None
+    except Exception as e:
+        logging.exception(f"Unexpected error in fetch_existing_times")
+        return None # Indicate error by returning None
 
 
