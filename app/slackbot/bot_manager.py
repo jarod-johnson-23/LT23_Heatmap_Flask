@@ -114,7 +114,10 @@ class BotManager:
             dict: The response containing text and/or function calls
         """
         # Personalize instructions for the main bot
-        personalized_instructions = f"{self.main_bot_instructions}\n\nYou are chatting with {user_email}."
+        current_datetime = datetime.now()
+        current_date = current_datetime.strftime('%Y-%m-%d')
+        day_of_week = current_datetime.strftime('%A')
+        personalized_instructions = f"{self.main_bot_instructions}\n\nYou are chatting with {user_email}. Today is {day_of_week}, {current_date}."
         
         # Initial call to the main bot
         try:
@@ -309,8 +312,10 @@ class BotManager:
             instructions = self._load_instructions(sub_bot["instructions_path"])
             tools = self._load_tools(sub_bot["tools_path"])
 
-            current_date = datetime.now().strftime('%Y-%m-%d')
-            personalized_instructions = f"{instructions}\n\nYou are processing a task for {user_email}. The current date is {current_date}."
+            now = datetime.now()
+            current_date = now.strftime('%Y-%m-%d')
+            day_of_week = now.strftime('%A')
+            personalized_instructions = f"{instructions}\n\nYou are processing a task for {user_email}. The current date is {current_date} ({day_of_week})."
 
             print(f"DEBUG: Calling Sub-Bot '{bot_name}' (Model: {self.model}) with message: '{message}' and slack_id: {slack_id}")
             # Initial call to the sub-bot
