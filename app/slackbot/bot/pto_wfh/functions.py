@@ -778,7 +778,7 @@ def delete_time_entry(slack_id: str, time_type: str, dates_to_delete: list):
     not_found_dates = list(valid_dates_to_delete) # Copy list to track misses
     fetch_api_url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userStories"
     fetch_params = {
-        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(user.id={targetprocess_id})}}',
+        'select': f'{{times:times.select({{timeId:Id,spent,date,id,user.name}}).Where(user.id={targetprocess_id})}}',
         'where': f'(Id={story_id})',
         'access_token': tp_api_key
     }
@@ -1011,7 +1011,7 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
     # Fetch all relevant time entries for the user on this story once
     fetch_api_url = "https://laneterralever.tpondemand.com/svc/tp-apiv2-streaming-service/stream/userStories"
     fetch_params = {
-        'select': f'{{times:times.select({{timeId:Id,spent,date,user.id,user.name}}).Where(user.id={targetprocess_id})}}',
+        'select': f'{{times:times.select({{timeId:Id,spent,date,id,user.name}}).Where(user.id={targetprocess_id})}}',
         'where': f'(Id={story_id})',
         'access_token': tp_api_key
     }
