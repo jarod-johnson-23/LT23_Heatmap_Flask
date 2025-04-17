@@ -660,4 +660,394 @@ def log_pto(slack_id: str, pto_entries: list):
         "data": { "results": results }
     }
 
+def log_wfh(slack_id: str, wfh_entries: list):
+    """
+    Logs Work From Home (WFH) entries in TargetProcess for the user associated
+    with the given Slack ID. Ensures dates are always in the future.
+
+    Args:
+        slack_id: The Slack ID of the user logging WFH.
+        wfh_entries: A list of dictionaries, where each dictionary represents a WFH day
+                     and must contain 'date' (YYYY-MM-DD string). The year in the date string
+                     will be adjusted to the nearest future occurrence.
+
+    Returns:
+        A dictionary containing the overall status and results for each entry.
+    """
+    print(f"Executing log_wfh for Slack ID: {slack_id} with {len(wfh_entries)} entries.")
+
+    # --- Input Validation ---
+    if not slack_id or not isinstance(slack_id, str):
+         return {"status": "failure_invalid_input", "reason": "Invalid Slack ID provided internally."}
+    if not wfh_entries or not isinstance(wfh_entries, list):
+        return {"status": "failure_invalid_input", "reason": "Invalid format for WFH entries (must be a list)."}
+
+    # --- Get TargetProcess ID from Slack ID ---
+    targetprocess_id = get_targetprocess_id_by_slack_id(slack_id)
+    if not targetprocess_id:
+        logging.warning(f"Could not find TargetProcess ID for Slack user {slack_id}.")
+        return {
+            "status": "failure_tool_error", # Or failure_user_not_linked
+            "reason": "Could not find a linked TargetProcess account for your Slack ID. Please ensure you have authenticated.",
+            "error_details": f"No targetprocess_id found for slack_id {slack_id} in local DB."
+        }
+    print(f"DEBUG: Found TargetProcess ID {targetprocess_id} for Slack ID {slack_id}")
+
+    # --- Get WFH Story ID from Cache ---
+    special_entities = potenza_api.get_special_entities_cache()
+    wfh_story_id = None
+    for entity in special_entities:
+        if entity.get('entity_nicname') == 'WORK_FROM_HOME_STORY':
+            wfh_story_id = entity.get('entity_id')
+            break
+
+    if not wfh_story_id:
+        logging.error("Could not find entity_id for WORK_FROM_HOME_STORY in special_entities cache.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: Could not find the WFH story ID.",
+            "error_details": "WORK_FROM_HOME_STORY entity_id missing from special_entities cache."
+        }
+    print(f"DEBUG: Found WFH Story ID: {wfh_story_id}")
+
+    # --- Get TargetProcess API Key ---
+    tp_api_key = os.getenv("TP_API_KEY")
+    if not tp_api_key:
+        logging.error("TP_API_KEY environment variable not set.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: TargetProcess API key is missing.",
+            "error_details": "TP_API_KEY environment variable not set."
+        }
+
+    # --- Process Each Entry ---
+    results = []
+    tp_api_url_base = "https://laneterralever.tpondemand.com/api/v1/times"
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+    success_count = 0
+    skipped_count = 0
+    failed_count = 0
+    today = date.today() # Get today's date once
+
+    for entry in wfh_entries:
+        original_date_str = entry.get('date')
+        entry_hours = entry.get('hours', 8) # Default to 8 hours, even if ignored later
+        # Initialize result
+        entry_result = {
+            "original_date_input": original_date_str,
+            "hours_input": entry_hours, # Store provided hours
+            "status": "pending"
+        }
+
+        # --- Date Validation and Year Correction ---
+        try:
+            llm_date = datetime.strptime(original_date_str, '%Y-%m-%d').date()
+            target_year = today.year
+            if (llm_date.month, llm_date.day) < (today.month, today.day):
+                target_year += 1
+            corrected_date = date(target_year, llm_date.month, llm_date.day)
+            corrected_date_str = corrected_date.strftime('%Y-%m-%d')
+            if corrected_date < today:
+                 entry_result["status"] = "failed"
+                 entry_result["reason"] = f"Cannot log WFH for a past date ({corrected_date_str})."
+                 entry_result["corrected_date"] = corrected_date_str
+                 failed_count += 1
+                 results.append(entry_result)
+                 print(f"DEBUG: Skipping past date {corrected_date_str} for WFH (original: {original_date_str})")
+                 continue
+            entry_result["date"] = corrected_date_str # Store corrected date
+            print(f"DEBUG: Corrected WFH date from '{original_date_str}' to '{corrected_date_str}'")
+
+        except (ValueError, TypeError) as e:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Invalid date format received for WFH: '{original_date_str}'. Expected YYYY-MM-DD. Error: {e}"
+            failed_count += 1
+            results.append(entry_result)
+            continue
+        # --- End Date Validation ---
+
+        # Validate hours (even though we might ignore the value for WFH API call)
+        if not isinstance(entry_hours, int) or entry_hours <= 0:
+             entry_result["status"] = "failed"
+             entry_result["reason"] = f"Invalid hours value received: '{entry_hours}'. Expected a positive integer."
+             failed_count += 1
+             results.append(entry_result)
+             continue
+
+        # Check if weekend using the *corrected* date
+        if corrected_date.weekday() >= 5: # Saturday or Sunday
+            entry_result["status"] = "skipped_weekend"
+            entry_result["reason"] = "Date falls on a weekend."
+            skipped_count += 1
+            results.append(entry_result)
+            continue
+
+        # Prepare API Payload using the *corrected* date string
+        payload = {
+            "Spent": 0, # Always 0 for WFH time entries
+            "Remain": 0,
+            "Description": f"WFH ({entry_hours}h requested) [[logged via slack bot]]", # Optionally include requested hours in description
+            "Date": corrected_date_str,
+            "User": { "Id": targetprocess_id },
+            "Assignable": { "Id": wfh_story_id }
+        }
+
+        # Make API Call - Pass token in URL parameters
+        try:
+            # Debug message doesn't need hours as Spent is 0
+            print(f"DEBUG: Logging WFH - Date: {corrected_date_str}, User: {targetprocess_id}")
+            response = requests.post(
+                tp_api_url_base,
+                params={'access_token': tp_api_key},
+                headers=headers,
+                json=payload,
+                timeout=20
+            )
+            response.raise_for_status()
+
+            entry_result["status"] = "logged"
+            entry_result["api_response"] = response.json()
+            success_count += 1
+            print(f"DEBUG: Successfully logged WFH for {corrected_date_str}")
+
+        except requests.exceptions.HTTPError as http_err:
+            entry_result["status"] = "failed"
+            error_content = "No details available"
+            try: error_content = response.json()
+            except json.JSONDecodeError: error_content = response.text
+            entry_result["reason"] = f"API Error: {http_err}"
+            entry_result["api_response"] = error_content
+            failed_count += 1
+            logging.error(f"Failed to log WFH for {corrected_date_str}. Status: {response.status_code}, Response: {error_content}")
+        except requests.exceptions.RequestException as req_err:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Network Error: {req_err}"
+            failed_count += 1
+            logging.error(f"Network error logging WFH for {corrected_date_str}: {req_err}")
+        except Exception as e:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Unexpected Error: {e}"
+            failed_count += 1
+            logging.exception(f"Unexpected error logging WFH for {corrected_date_str}")
+
+        results.append(entry_result)
+
+    # --- Determine Overall Status and Message ---
+    overall_status = "success"
+    if failed_count > 0 and success_count == 0 and skipped_count == 0:
+        overall_status = "failure_tool_error"
+    elif failed_count > 0:
+        overall_status = "partial_success"
+
+    message = f"WFH logging complete. Logged: {success_count}, Skipped (weekend): {skipped_count}, Failed: {failed_count}."
+    if overall_status == "failure_tool_error":
+         message = f"WFH logging failed for all {failed_count} entries."
+    elif overall_status == "partial_success":
+         message = f"WFH logging partially successful. Logged: {success_count}, Skipped (weekend): {skipped_count}, Failed: {failed_count}."
+
+    print(f"DEBUG: {message}")
+    return {
+        "status": overall_status,
+        "message": message,
+        "data": { "results": results }
+    }
+
+def log_sick(slack_id: str, sick_entries: list):
+    """
+    Logs Sick Time entries in TargetProcess for the user associated
+    with the given Slack ID. Ensures dates are always in the future.
+
+    Args:
+        slack_id: The Slack ID of the user logging sick time.
+        sick_entries: A list of dictionaries, where each dictionary represents a sick day
+                      and must contain 'date' (YYYY-MM-DD string) and optionally
+                      'hours' (integer, defaults to 8). The year in the date string
+                      will be adjusted to the nearest future occurrence.
+
+    Returns:
+        A dictionary containing the overall status and results for each entry.
+    """
+    print(f"Executing log_sick for Slack ID: {slack_id} with {len(sick_entries)} entries.")
+
+    # --- Input Validation ---
+    if not slack_id or not isinstance(slack_id, str):
+         return {"status": "failure_invalid_input", "reason": "Invalid Slack ID provided internally."}
+    if not sick_entries or not isinstance(sick_entries, list):
+        return {"status": "failure_invalid_input", "reason": "Invalid format for Sick Time entries (must be a list)."}
+
+    # --- Get TargetProcess ID from Slack ID ---
+    targetprocess_id = get_targetprocess_id_by_slack_id(slack_id)
+    if not targetprocess_id:
+        logging.warning(f"Could not find TargetProcess ID for Slack user {slack_id}.")
+        return {
+            "status": "failure_tool_error", # Or failure_user_not_linked
+            "reason": "Could not find a linked TargetProcess account for your Slack ID. Please ensure you have authenticated.",
+            "error_details": f"No targetprocess_id found for slack_id {slack_id} in local DB."
+        }
+    print(f"DEBUG: Found TargetProcess ID {targetprocess_id} for Slack ID {slack_id}")
+
+    # --- Get Sick Story ID from Cache ---
+    special_entities = potenza_api.get_special_entities_cache()
+    sick_story_id = None
+    for entity in special_entities:
+        if entity.get('entity_nicname') == 'SICK_STORY':
+            sick_story_id = entity.get('entity_id')
+            break
+
+    if not sick_story_id:
+        logging.error("Could not find entity_id for SICK_STORY in special_entities cache.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: Could not find the Sick Time story ID.",
+            "error_details": "SICK_STORY entity_id missing from special_entities cache."
+        }
+    print(f"DEBUG: Found Sick Story ID: {sick_story_id}")
+
+    # --- Get TargetProcess API Key ---
+    tp_api_key = os.getenv("TP_API_KEY")
+    if not tp_api_key:
+        logging.error("TP_API_KEY environment variable not set.")
+        return {
+            "status": "failure_tool_error",
+            "reason": "Configuration error: TargetProcess API key is missing.",
+            "error_details": "TP_API_KEY environment variable not set."
+        }
+
+    # --- Process Each Entry ---
+    results = []
+    tp_api_url_base = "https://laneterralever.tpondemand.com/api/v1/times"
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+    success_count = 0
+    skipped_count = 0
+    failed_count = 0
+    today = date.today() # Get today's date once
+
+    for entry in sick_entries:
+        original_date_str = entry.get('date')
+        entry_hours = entry.get('hours', 8) # Default to 8 hours
+        # Initialize result
+        entry_result = {
+            "original_date_input": original_date_str,
+            "hours_input": entry_hours,
+            "status": "pending"
+        }
+
+        # --- Date Validation and Year Correction ---
+        try:
+            llm_date = datetime.strptime(original_date_str, '%Y-%m-%d').date()
+            target_year = today.year
+            if (llm_date.month, llm_date.day) < (today.month, today.day):
+                target_year += 1
+            corrected_date = date(target_year, llm_date.month, llm_date.day)
+            corrected_date_str = corrected_date.strftime('%Y-%m-%d')
+            if corrected_date < today:
+                 entry_result["status"] = "failed"
+                 entry_result["reason"] = f"Cannot log Sick Time for a past date ({corrected_date_str})."
+                 entry_result["corrected_date"] = corrected_date_str
+                 failed_count += 1
+                 results.append(entry_result)
+                 print(f"DEBUG: Skipping past date {corrected_date_str} for Sick Time (original: {original_date_str})")
+                 continue
+            entry_result["date"] = corrected_date_str
+            print(f"DEBUG: Corrected Sick Time date from '{original_date_str}' to '{corrected_date_str}'")
+
+        except (ValueError, TypeError) as e:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Invalid date format received for Sick Time: '{original_date_str}'. Expected YYYY-MM-DD. Error: {e}"
+            failed_count += 1
+            results.append(entry_result)
+            continue
+        # --- End Date Validation ---
+
+        # Validate hours
+        if not isinstance(entry_hours, int) or entry_hours <= 0:
+             entry_result["status"] = "failed"
+             entry_result["reason"] = f"Invalid hours value: '{entry_hours}'. Expected a positive integer."
+             failed_count += 1
+             results.append(entry_result)
+             continue
+
+        # Check if weekend using the *corrected* date
+        if corrected_date.weekday() >= 5: # Saturday or Sunday
+            entry_result["status"] = "skipped_weekend"
+            entry_result["reason"] = "Date falls on a weekend."
+            skipped_count += 1
+            results.append(entry_result)
+            continue
+
+        # Prepare API Payload using the *corrected* date string
+        payload = {
+            "Spent": entry_hours, # Use provided hours for Sick Time
+            "Remain": 0,
+            "Description": "Sick Time [[logged via slack bot]]",
+            "Date": corrected_date_str,
+            "User": { "Id": targetprocess_id },
+            "Assignable": { "Id": sick_story_id }
+        }
+
+        # Make API Call - Pass token in URL parameters
+        try:
+            print(f"DEBUG: Logging Sick Time - Date: {corrected_date_str}, Hours: {entry_hours}, User: {targetprocess_id}")
+            response = requests.post(
+                tp_api_url_base,
+                params={'access_token': tp_api_key},
+                headers=headers,
+                json=payload,
+                timeout=20
+            )
+            response.raise_for_status()
+
+            entry_result["status"] = "logged"
+            entry_result["api_response"] = response.json()
+            success_count += 1
+            print(f"DEBUG: Successfully logged Sick Time for {corrected_date_str}")
+
+        except requests.exceptions.HTTPError as http_err:
+            entry_result["status"] = "failed"
+            error_content = "No details available"
+            try: error_content = response.json()
+            except json.JSONDecodeError: error_content = response.text
+            entry_result["reason"] = f"API Error: {http_err}"
+            entry_result["api_response"] = error_content
+            failed_count += 1
+            logging.error(f"Failed to log Sick Time for {corrected_date_str}. Status: {response.status_code}, Response: {error_content}")
+        except requests.exceptions.RequestException as req_err:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Network Error: {req_err}"
+            failed_count += 1
+            logging.error(f"Network error logging Sick Time for {corrected_date_str}: {req_err}")
+        except Exception as e:
+            entry_result["status"] = "failed"
+            entry_result["reason"] = f"Unexpected Error: {e}"
+            failed_count += 1
+            logging.exception(f"Unexpected error logging Sick Time for {corrected_date_str}")
+
+        results.append(entry_result)
+
+    # --- Determine Overall Status and Message ---
+    overall_status = "success"
+    if failed_count > 0 and success_count == 0 and skipped_count == 0:
+        overall_status = "failure_tool_error"
+    elif failed_count > 0:
+        overall_status = "partial_success"
+
+    message = f"Sick Time logging complete. Logged: {success_count}, Skipped (weekend): {skipped_count}, Failed: {failed_count}."
+    if overall_status == "failure_tool_error":
+         message = f"Sick Time logging failed for all {failed_count} entries."
+    elif overall_status == "partial_success":
+         message = f"Sick Time logging partially successful. Logged: {success_count}, Skipped (weekend): {skipped_count}, Failed: {failed_count}."
+
+    print(f"DEBUG: {message}")
+    return {
+        "status": overall_status,
+        "message": message,
+        "data": { "results": results }
+    }
+
 

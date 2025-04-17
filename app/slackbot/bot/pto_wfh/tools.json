@@ -95,5 +95,69 @@
       "required": ["pto_entries"],
       "additionalProperties": false
     }
+  },
+  {
+    "type": "function",
+    "name": "log_wfh",
+    "description": "Logs Work From Home (WFH) entries in TargetProcess for the requesting user. The function uses the user's Slack ID to find their TargetProcess ID. The LLM MUST parse the user's request (e.g., 'log WFH for next Monday', 'log WFH July 1-5 for 4 hours') and construct the 'wfh_entries' array. Each entry in the array MUST represent a single day with its date in 'YYYY-MM-DD' format and MAY include 'hours' (defaults to 8 if omitted, though typically ignored for WFH logging itself). Expand date ranges into individual day entries.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "wfh_entries": {
+          "type": "array",
+          "description": "An array of objects, each representing a single day of WFH to log. Each object MUST contain a 'date' (string, YYYY-MM-DD format) and MAY contain 'hours' (integer, defaults to 8 if omitted). Example: [{'date': '2024-07-29'}, {'date': '2024-07-30', 'hours': 4}]",
+          "items": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string",
+                "description": "The specific date for the WFH entry, formatted strictly as YYYY-MM-DD.",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "hours": {
+                "type": "integer",
+                "description": "The number of hours requested for WFH on this date. Defaults to 8 if not provided.",
+                "minimum": 1
+              }
+            },
+            "required": ["date"]
+          }
+        }
+      },
+      "required": ["wfh_entries"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "log_sick",
+    "description": "Logs Sick Time entries in TargetProcess for the requesting user. The function uses the user's Slack ID to find their TargetProcess ID. The LLM MUST parse the user's request (e.g., 'log sick time for today', 'log sick time July 1-2', 'log 4 hours sick time tomorrow') and construct the 'sick_entries' array. Each entry in the array MUST represent a single day with its date in 'YYYY-MM-DD' format and MAY include 'hours' (defaults to 8 if omitted). Expand date ranges into individual day entries.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "sick_entries": {
+          "type": "array",
+          "description": "An array of objects, each representing a single day of Sick Time to log. Each object MUST contain a 'date' (string, YYYY-MM-DD format) and MAY contain 'hours' (integer, defaults to 8 if omitted). Example: [{'date': '2024-07-29', 'hours': 8}, {'date': '2024-07-30'}]",
+          "items": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string",
+                "description": "The specific date for the Sick Time entry, formatted strictly as YYYY-MM-DD.",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "hours": {
+                "type": "integer",
+                "description": "The number of hours for the Sick Time entry on this date. Defaults to 8 if not provided.",
+                "minimum": 1
+              }
+            },
+            "required": ["date"]
+          }
+        }
+      },
+      "required": ["sick_entries"],
+      "additionalProperties": false
+    }
   }
 ]
