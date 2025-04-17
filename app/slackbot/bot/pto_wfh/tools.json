@@ -66,118 +66,108 @@
   },
   {
     "type": "function",
-    "name": "log_pto",
-    "description": "Logs Paid Time Off (PTO) entries in TargetProcess for the requesting user. The function uses the user's Slack ID to find their TargetProcess ID. The LLM MUST parse the user's request (e.g., 'log PTO for next Monday', 'log PTO July 1-5', 'log 4 hours PTO tomorrow') and construct the 'pto_entries' array. Each entry in the array MUST represent a single day with its date in 'YYYY-MM-DD' format. Expand date ranges into individual day entries. If hours are not specified, default to 8.",
+    "name": "log_time_entry",
+    "description": "Logs time entries (PTO, WFH, or Sick) in TargetProcess for the requesting user. The LLM MUST determine the 'time_type' (PTO, WFH, Sick) and parse the user's request (e.g., 'log PTO for next Monday', 'log WFH July 1-5', 'log 4 hours Sick tomorrow') to construct the 'entries' array. Each entry in the array MUST represent a single day with its date in 'YYYY-MM-DD' format and MAY contain 'hours' (integer, defaults to 8). Expand date ranges.",
     "parameters": {
       "type": "object",
       "properties": {
-        "pto_entries": {
+        "time_type": {
+          "type": "string",
+          "description": "The type of time entry being logged.",
+          "enum": ["PTO", "WFH", "Sick"]
+        },
+        "entries": {
           "type": "array",
-          "description": "An array of objects, each representing a single day of PTO to log. Each object MUST contain a 'date' (string, YYYY-MM-DD format) and MAY contain 'hours' (integer, defaults to 8 if omitted). Example: [{'date': '2024-07-29', 'hours': 8}, {'date': '2024-07-30'}]",
+          "description": "An array of objects, each representing a single day of time to log. Each object MUST contain a 'date' (string, YYYY-MM-DD format) and MAY contain 'hours' (integer, defaults to 8). Example: [{'date': '2024-07-29', 'hours': 8}, {'date': '2024-07-30'}]",
           "items": {
             "type": "object",
             "properties": {
               "date": {
                 "type": "string",
-                "description": "The specific date for the PTO entry, formatted strictly as YYYY-MM-DD.",
+                "description": "The specific date for the time entry, formatted strictly as YYYY-MM-DD.",
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
               },
               "hours": {
                 "type": "integer",
-                "description": "The number of hours for the PTO entry on this date. Defaults to 8 if not provided.",
-                "minimum": 1
+                "description": "The number of hours for the entry on this date (typically 1-8). Defaults to 8 if not provided.",
+                "minimum": 1,
+                "maximum": 8
               }
             },
             "required": ["date"]
           }
         }
       },
-      "required": ["pto_entries"],
+      "required": ["time_type", "entries"],
       "additionalProperties": false
     }
   },
   {
     "type": "function",
-    "name": "log_wfh",
-    "description": "Logs Work From Home (WFH) entries in TargetProcess for the requesting user. The function uses the user's Slack ID to find their TargetProcess ID. The LLM MUST parse the user's request (e.g., 'log WFH for next Monday', 'log WFH July 1-5 for 4 hours') and construct the 'wfh_entries' array. Each entry in the array MUST represent a single day with its date in 'YYYY-MM-DD' format and MAY include 'hours' (defaults to 8 if omitted, though typically ignored for WFH logging itself). Expand date ranges into individual day entries.",
+    "name": "delete_time_entry",
+    "description": "Finds and DELETES existing time entries (PTO, WFH, or Sick) logged in TargetProcess for the requesting user on specific dates. The LLM MUST determine the 'time_type' (PTO, WFH, Sick) and parse the user's request (e.g., 'delete my PTO for next Monday', 'remove WFH July 1-2') to construct the 'dates_to_delete' array. Each entry MUST be a single date string in 'YYYY-MM-DD' format. Expand date ranges.",
     "parameters": {
       "type": "object",
       "properties": {
-        "wfh_entries": {
-          "type": "array",
-          "description": "An array of objects, each representing a single day of WFH to log. Each object MUST contain a 'date' (string, YYYY-MM-DD format) and MAY contain 'hours' (integer, defaults to 8 if omitted). Example: [{'date': '2024-07-29'}, {'date': '2024-07-30', 'hours': 4}]",
-          "items": {
-            "type": "object",
-            "properties": {
-              "date": {
-                "type": "string",
-                "description": "The specific date for the WFH entry, formatted strictly as YYYY-MM-DD.",
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-              },
-              "hours": {
-                "type": "integer",
-                "description": "The number of hours requested for WFH on this date. Defaults to 8 if not provided.",
-                "minimum": 1
-              }
-            },
-            "required": ["date"]
-          }
-        }
-      },
-      "required": ["wfh_entries"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "type": "function",
-    "name": "log_sick",
-    "description": "Logs Sick Time entries in TargetProcess for the requesting user. The function uses the user's Slack ID to find their TargetProcess ID. The LLM MUST parse the user's request (e.g., 'log sick time for today', 'log sick time July 1-2', 'log 4 hours sick time tomorrow') and construct the 'sick_entries' array. Each entry in the array MUST represent a single day with its date in 'YYYY-MM-DD' format and MAY include 'hours' (defaults to 8 if omitted). Expand date ranges into individual day entries.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "sick_entries": {
-          "type": "array",
-          "description": "An array of objects, each representing a single day of Sick Time to log. Each object MUST contain a 'date' (string, YYYY-MM-DD format) and MAY contain 'hours' (integer, defaults to 8 if omitted). Example: [{'date': '2024-07-29', 'hours': 8}, {'date': '2024-07-30'}]",
-          "items": {
-            "type": "object",
-            "properties": {
-              "date": {
-                "type": "string",
-                "description": "The specific date for the Sick Time entry, formatted strictly as YYYY-MM-DD.",
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-              },
-              "hours": {
-                "type": "integer",
-                "description": "The number of hours for the Sick Time entry on this date. Defaults to 8 if not provided.",
-                "minimum": 1
-              }
-            },
-            "required": ["date"]
-          }
-        }
-      },
-      "required": ["sick_entries"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "type": "function",
-    "name": "delete_pto",
-    "description": "Finds existing Paid Time Off (PTO) time entries logged in TargetProcess for the requesting user on specific dates. It identifies the internal 'timeId' needed for deletion but DOES NOT perform the deletion itself. The LLM MUST parse the user's request (e.g., 'delete my PTO for next Monday', 'remove PTO July 1-2') and construct the 'dates_to_delete' array. Each entry MUST be a single date string in 'YYYY-MM-DD' format. Expand date ranges.",
-    "parameters": {
-      "type": "object",
-      "properties": {
+        "time_type": {
+          "type": "string",
+          "description": "The type of time entry being deleted.",
+          "enum": ["PTO", "WFH", "Sick"]
+        },
         "dates_to_delete": {
           "type": "array",
-          "description": "An array of date strings, each representing a single day of PTO to find for potential deletion. Each date MUST be formatted strictly as YYYY-MM-DD. Example: ['2024-07-29', '2024-07-30']",
+          "description": "An array of date strings, each representing a single day of time to find and delete. Each date MUST be formatted strictly as YYYY-MM-DD. Example: ['2024-07-29', '2024-07-30']",
           "items": {
             "type": "string",
-            "description": "A specific date for which to find a PTO entry, formatted strictly as YYYY-MM-DD.",
+            "description": "A specific date for which to find and delete an entry, formatted strictly as YYYY-MM-DD.",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
           }
         }
       },
-      "required": ["dates_to_delete"],
+      "required": ["time_type", "dates_to_delete"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_time_entry",
+    "description": "Updates one or more existing time entries (PTO, WFH, or Sick) for the requesting user. Finds entries based on their original dates and type, then modifies their date and/or hours spent. The LLM MUST determine the 'time_type' (PTO, WFH, Sick) and construct the 'updates' array. Each object in the array MUST specify the 'original_date' (YYYY-MM-DD) and at least one of 'new_date' (YYYY-MM-DD) or 'new_hours' (integer).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "time_type": {
+          "type": "string",
+          "description": "The type of time entry being updated (applies to all updates in the list).",
+          "enum": ["PTO", "WFH", "Sick"]
+        },
+        "updates": {
+          "type": "array",
+          "description": "An array of objects, each representing a single time entry update request.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "original_date": {
+                "type": "string",
+                "description": "The original date of the time entry to be updated, formatted strictly as YYYY-MM-DD.",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "new_date": {
+                "type": "string",
+                "description": "Optional. The new date to move the time entry to, formatted strictly as YYYY-MM-DD.",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "new_hours": {
+                "type": "integer",
+                "description": "Optional. The new number of hours for the time entry (typically 1-8).",
+                "minimum": 1,
+                "maximum": 8
+              }
+            },
+            "required": ["original_date"]
+          }
+        }
+      },
+      "required": ["time_type", "updates"],
       "additionalProperties": false
     }
   }
