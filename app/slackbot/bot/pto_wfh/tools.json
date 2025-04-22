@@ -23,6 +23,22 @@
   },
   {
     "type": "function",
+    "name": "get_users_on_pto_by_date",
+    "description": "Gets a list of all employees who are marked as being on Paid Time Off (PTO) for a specific date. Use this when asked 'who is out on [specific date]?', 'who is on vacation next Monday?', etc.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "The date to check in YYYY-MM-DD format."
+        }
+      },
+      "required": ["date"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
     "name": "get_upcoming_pto_by_name",
     "description": "Looks up scheduled future Paid Time Off (PTO) dates for a specific employee based on their name. Use this to find out when someone will be out of the office in the future.",
     "parameters": {
@@ -45,6 +61,22 @@
       "type": "object",
       "properties": {},
       "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_users_wfh_by_date",
+    "description": "Gets a list of all employees who are marked as Working From Home (WFH) for a specific date. Use this when asked 'who is working from home on [specific date]?', 'who is remote next Friday?', etc.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "The date to check in YYYY-MM-DD format."
+        }
+      },
+      "required": ["date"],
       "additionalProperties": false
     }
   },

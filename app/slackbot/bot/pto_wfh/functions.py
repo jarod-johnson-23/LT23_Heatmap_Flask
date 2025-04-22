@@ -141,168 +141,33 @@ def get_pto_balance(slack_id: str):
         }
 
 # --- Functions to Get Users on PTO/WFH Today ---
-def get_users_on_pto_today():
+def get_users_on_pto_today(slack_id=None):
     """
-    Retrieves a list of users who have logged PTO for today.
-
+    Gets a list of users who are on PTO today.
+    This is a wrapper around get_users_on_pto_by_date for backward compatibility.
+    
+    Args:
+        slack_id: The Slack ID of the user making the request (implicitly provided)
+        
     Returns:
-        A dictionary containing the status and a list of users on PTO today,
-        including their name and whether it's a partial day, or an error message.
+        A dictionary containing the status and list of users on PTO today
     """
-    print("Executing get_users_on_pto_today")
+    # Call the new function with today's date
+    return get_users_on_pto_by_date(date=None, slack_id=slack_id)
 
-    # 1. Get today's date
-    today_date = datetime.now().strftime('%Y-%m-%d')
-    print(f"DEBUG: Checking PTO for date: {today_date}")
-
-    # 2. Define and format the SQL query
-    #    Note: Ensure the date is quoted in the SQL WHERE clause.
-    sql_query = f"""
-        SELECT u.distinct_name, case when hours < 7 THEN 1 else 0 end as is_partial
-        FROM actual_hours_recent_detailed ah left join users u
-             on u.user_id = ah.user_id
-        WHERE is_pto = 1
-             AND u.is_active = 1
-            AND transaction_date = '{today_date}'
-        ORDER BY ah.role_type, u.distinct_name
+def get_users_wfh_today(slack_id=None):
     """
-
-    # 3. Execute the query using Potenza API
-    try:
-        print(f"DEBUG: Executing Potenza SQL for users on PTO today:\n{sql_query}")
-        result = potenza_api.execute_sql(sql_query)
-        print(f"DEBUG: Potenza Result: {result}")
-
-        # 4. Process the result
-        if result and isinstance(result, list):
-            users_on_pto = []
-            for row in result:
-                users_on_pto.append({
-                    "name": row.get('distinct_name'),
-                    "is_partial_day": bool(row.get('is_partial', 0)) # Convert 1/0 to True/False
-                })
-
-            message = f"Found {len(users_on_pto)} user(s) on PTO today ({today_date})."
-            if not users_on_pto:
-                 message = f"No users found on PTO today ({today_date})."
-
-            print(f"DEBUG: {message}")
-
-            # 5. Format success response
-            return {
-                "status": "success",
-                "message": message,
-                "data": {
-                    "date_checked": today_date,
-                    "users_on_pto": users_on_pto
-                }
-            }
-        elif isinstance(result, list) and len(result) == 0:
-             # This is also a valid success case (no one is out)
-             message = f"No users found on PTO today ({today_date})."
-             print(f"DEBUG: {message}")
-             return {
-                 "status": "success",
-                 "message": message,
-                 "data": {
-                     "date_checked": today_date,
-                     "users_on_pto": []
-                 }
-             }
-        else:
-            # Handle unexpected result format from Potenza
-            print(f"ERROR: Unexpected result format from Potenza API for users on PTO: {result}")
-            return {
-                "status": "failure_tool_error",
-                "reason": "Received an unexpected response format while fetching today's PTO list.",
-                "error_details": f"Unexpected Potenza result type: {type(result)}"
-            }
-    except Exception as e:
-        print(f"ERROR: Failed to execute Potenza SQL or process result for users on PTO today: {e}")
-        traceback.print_exc() # Ensure traceback is imported
-        return {
-            "status": "failure_tool_error",
-            "reason": "An error occurred while communicating with the data source for today's PTO list.",
-            "error_details": str(e)
-        }
-
-def get_users_wfh_today():
-    """
-    Retrieves a list of users who are marked as Working From Home (WFH) today.
-
+    Gets a list of users who are working from home today.
+    This is a wrapper around get_users_wfh_by_date for backward compatibility.
+    
+    Args:
+        slack_id: The Slack ID of the user making the request (implicitly provided)
+        
     Returns:
-        A dictionary containing the status and a list of users WFH today,
-        including their name and whether it's a partial day, or an error message.
+        A dictionary containing the status and list of users working from home today
     """
-    print("Executing get_users_wfh_today")
-
-    # 1. Get today's date
-    today_date = datetime.now().strftime('%Y-%m-%d')
-    print(f"DEBUG: Checking WFH for date: {today_date}")
-
-    # 2. Define and format the SQL query
-    #    Note: Ensure the date is quoted in the SQL WHERE clause.
-    sql_query = f"""
-        SELECT u.distinct_name, case when hours < 7 THEN 1 else 0 end as is_partial
-        FROM actual_hours_recent_detailed ah left join users u
-             on u.user_id = ah.user_id
-        WHERE ah.story_id in ( SELECT story_id FROM recent_wfh_stories )
-             AND u.is_active = 1
-             AND transaction_date = '{today_date}'
-        ORDER BY ah.role_type, u.distinct_name
-    """
-
-    # 3. Execute the query using Potenza API
-    try:
-        print(f"DEBUG: Executing Potenza SQL for users WFH today:\n{sql_query}")
-        result = potenza_api.execute_sql(sql_query)
-        print(f"DEBUG: Potenza Result: {result}")
-
-        # 4. Process the result
-        if isinstance(result, list):
-            users_wfh = []
-            for row in result:
-                users_wfh.append({
-                    "name": row.get('distinct_name'),
-                    "is_partial_day": bool(row.get('is_partial', 0)) # Convert 1/0 to True/False
-                })
-
-            message = f"Found {len(users_wfh)} user(s) working from home today ({today_date})."
-            if not users_wfh:
-                 message = f"No users found working from home today ({today_date})."
-
-            print(f"DEBUG: {message}")
-
-            # 5. Format success response
-            return {
-                "status": "success",
-                "message": message,
-                "data": {
-                    "date_checked": today_date,
-                    "users_wfh": users_wfh
-                }
-            }
-        # Handle empty list as success (no one WFH) - combined with above check
-        # elif isinstance(result, list) and len(result) == 0: ...
-
-        else:
-            # Handle unexpected result format from Potenza
-            print(f"ERROR: Unexpected result format from Potenza API for users WFH: {result}")
-            return {
-                "status": "failure_tool_error",
-                "reason": "Received an unexpected response format while fetching today's WFH list.",
-                "error_details": f"Unexpected Potenza result type: {type(result)}"
-            }
-
-    except Exception as e:
-        print(f"ERROR: Failed to execute Potenza SQL or process result for users WFH today: {e}")
-        traceback.print_exc() # Ensure traceback is imported
-        return {
-            "status": "failure_tool_error",
-            "reason": "An error occurred while communicating with the data source for today's WFH list.",
-            "error_details": str(e)
-        }
-
+    # Call the new function with today's date
+    return get_users_wfh_by_date(date=None, slack_id=slack_id)
 
 # --- Functions to Get Upcoming PTO/WFH by Name ---
 def get_upcoming_pto_by_name(name: str):
@@ -1228,4 +1093,189 @@ def fetch_existing_times(targetprocess_id: int, story_id: int, time_type: str, t
         logging.exception(f"Unexpected error in fetch_existing_times")
         return None # Indicate error by returning None
 
+def get_users_on_pto_by_date(date, slack_id=None):
+    """
+    Gets a list of users who are on PTO for a specific date.
+    
+    Args:
+        date: The date to check in YYYY-MM-DD format.
+        slack_id: The Slack ID of the user making the request (implicitly provided)
+        
+    Returns:
+        A dictionary containing the status and list of users on PTO
+    """
+    print(f"Executing get_users_on_pto_by_date for date: {date}")
+
+    try:
+        # Validate the date format
+        try:
+            check_date = datetime.strptime(date, '%Y-%m-%d')
+            formatted_date = date  # Already in the correct format
+        except ValueError:
+            return {
+                "status": "failure_invalid_input",
+                "reason": f"Invalid date format: {date}. Please use YYYY-MM-DD format."
+            }
+        
+        # Define and format the SQL query
+        sql_query = f"""
+            SELECT u.distinct_name, case when hours < 7 THEN 1 else 0 end as is_partial
+            FROM actual_hours_recent_detailed ah left join users u
+                 on u.user_id = ah.user_id
+            WHERE is_pto = 1
+                 AND u.is_active = 1
+                AND transaction_date = '{formatted_date}'
+            ORDER BY ah.role_type, u.distinct_name
+        """
+        
+        # Execute the query using Potenza API
+        print(f"DEBUG: Executing Potenza SQL for users on PTO on {formatted_date}:\n{sql_query}")
+        result = potenza_api.execute_sql(sql_query)
+        print(f"DEBUG: Potenza Result: {result}")
+        
+        # Process the result
+        if result and isinstance(result, list):
+            users_on_pto = []
+            for row in result:
+                users_on_pto.append({
+                    "name": row.get('distinct_name'),
+                    "is_partial_day": bool(row.get('is_partial', 0))  # Convert 1/0 to True/False
+                })
+            
+            # Format the date for display
+            display_date = check_date.strftime('%A, %B %d, %Y')
+            
+            message = f"Found {len(users_on_pto)} user(s) on PTO for {display_date}."
+            if not users_on_pto:
+                message = f"No users found on PTO for {display_date}."
+            
+            print(f"DEBUG: {message}")
+            
+            # Format success response
+            return {
+                "status": "success",
+                "message": message,
+                "data": {
+                    "date": formatted_date,
+                    "display_date": display_date,
+                    "users_on_pto": users_on_pto
+                }
+            }
+        elif isinstance(result, list) and len(result) == 0:
+            # This is also a valid success case (no one is out)
+            display_date = check_date.strftime('%A, %B %d, %Y')
+            message = f"No users found on PTO for {display_date}."
+            print(f"DEBUG: {message}")
+            return {
+                "status": "success",
+                "message": message,
+                "data": {
+                    "date": formatted_date,
+                    "display_date": display_date,
+                    "users_on_pto": []
+                }
+            }
+        else:
+            # Handle unexpected result format from Potenza
+            print(f"ERROR: Unexpected result format from Potenza API for users on PTO: {result}")
+            return {
+                "status": "failure_tool_error",
+                "reason": f"Received an unexpected response format while fetching PTO list for {date}.",
+                "error_details": f"Unexpected Potenza result type: {type(result)}"
+            }
+    except Exception as e:
+        print(f"ERROR: Failed to execute Potenza SQL or process result for users on PTO on {date}: {e}")
+        traceback.print_exc()  # Ensure traceback is imported
+        return {
+            "status": "failure_tool_error",
+            "reason": f"An error occurred while communicating with the data source for PTO list on {date}.",
+            "error_details": str(e)
+        }
+
+def get_users_wfh_by_date(date, slack_id=None):
+    """
+    Gets a list of users who are working from home for a specific date.
+    
+    Args:
+        date: The date to check in YYYY-MM-DD format.
+        slack_id: The Slack ID of the user making the request (implicitly provided)
+        
+    Returns:
+        A dictionary containing the status and list of users working from home
+    """
+    print(f"Executing get_users_wfh_by_date for date: {date}")
+
+    try:
+        # Validate the date format
+        try:
+            check_date = datetime.strptime(date, '%Y-%m-%d')
+            formatted_date = date  # Already in the correct format
+        except ValueError:
+            return {
+                "status": "failure_invalid_input",
+                "reason": f"Invalid date format: {date}. Please use YYYY-MM-DD format."
+            }
+        
+        # Define and format the SQL query
+        sql_query = f"""
+            SELECT u.distinct_name, case when hours < 7 THEN 1 else 0 end as is_partial
+            FROM actual_hours_recent_detailed ah left join users u
+                 on u.user_id = ah.user_id
+            WHERE ah.story_id in ( SELECT story_id FROM recent_wfh_stories )
+                 AND u.is_active = 1
+                 AND transaction_date = '{formatted_date}'
+            ORDER BY ah.role_type, u.distinct_name
+        """
+        
+        # Execute the query using Potenza API
+        print(f"DEBUG: Executing Potenza SQL for users WFH on {formatted_date}:\n{sql_query}")
+        result = potenza_api.execute_sql(sql_query)
+        print(f"DEBUG: Potenza Result: {result}")
+        
+        # Process the result
+        if isinstance(result, list):
+            users_wfh = []
+            for row in result:
+                users_wfh.append({
+                    "name": row.get('distinct_name'),
+                    "is_partial_day": bool(row.get('is_partial', 0))  # Convert 1/0 to True/False
+                })
+            
+            # Format the date for display
+            display_date = check_date.strftime('%A, %B %d, %Y')
+            
+            message = f"Found {len(users_wfh)} user(s) working from home for {display_date}."
+            if not users_wfh:
+                message = f"No users found working from home for {display_date}."
+            
+            print(f"DEBUG: {message}")
+            
+            # Format success response
+            return {
+                "status": "success",
+                "message": message,
+                "data": {
+                    "date": formatted_date,
+                    "display_date": display_date,
+                    "users_wfh": users_wfh
+                }
+            }
+        # Handle empty list as success (no one WFH) - combined with above check
+        
+        else:
+            # Handle unexpected result format from Potenza
+            print(f"ERROR: Unexpected result format from Potenza API for users WFH: {result}")
+            return {
+                "status": "failure_tool_error",
+                "reason": f"Received an unexpected response format while fetching WFH list for {date}.",
+                "error_details": f"Unexpected Potenza result type: {type(result)}"
+            }
+    except Exception as e:
+        print(f"ERROR: Failed to execute Potenza SQL or process result for users WFH on {date}: {e}")
+        traceback.print_exc()  # Ensure traceback is imported
+        return {
+            "status": "failure_tool_error",
+            "reason": f"An error occurred while communicating with the data source for WFH list on {date}.",
+            "error_details": str(e)
+        }
 

@@ -33,30 +33,17 @@
     </CoreTask>
 
     <Input>
-        You will receive a single natural language **text string** from the Manager Bot. The user's Slack ID is implicitly available to the function execution context. You also know the current date.
-        <ExampleInput>"Log PTO for me for next Monday."</ExampleInput>
-        <ExampleInput>"Log 4 hours PTO for me on 2024-08-01"</ExampleInput>
-        <ExampleInput>"Log PTO for me from August 5th through August 7th"</ExampleInput>
-        <ExampleInput>"Mark me as WFH tomorrow."</ExampleInput>
-        <ExampleInput>"I'll be working from home next week (Mon-Fri)."</ExampleInput>
+        You will receive a single natural language **text string** from the Manager Bot.
         <ExampleInput>"What's my PTO balance?"</ExampleInput>
-        <ExampleInput>"Who is out today?"</ExampleInput>
-        <ExampleInput>"Is Jane Doe working from home today?"</ExampleInput>
-        <ExampleInput>"When is Peter Pan scheduled to be WFH next?"</ExampleInput>
-        <ExampleInput>"Log WFH for me next Tuesday for 4 hours."</ExampleInput>
-        <ExampleInput>"Log sick time for me today."</ExampleInput>
-        <ExampleInput>"I need to log 4 hours sick time for yesterday."</ExampleInput>
-        <ExampleInput>"Log sick for me July 10-11."</ExampleInput>
-        <ExampleInput>"Delete my PTO for next Monday."</ExampleInput>
-        <ExampleInput>"Remove the PTO I logged for Aug 5th and Aug 6th."</ExampleInput>
-        <ExampleInput>"Cancel my vacation time for tomorrow."</ExampleInput>
-        <ExampleInput>"Delete the WFH I logged for yesterday."</ExampleInput>
-        <ExampleInput>"Remove my sick time from last Tuesday."</ExampleInput>
-        <ExampleInput>"Change my PTO on Monday to Tuesday, and change my PTO on Wednesday to 6 hours."</ExampleInput>
-        <ExampleInput>"Move my WFH from Aug 5 and Aug 6 to Aug 12 and Aug 13."</ExampleInput>
-        <ExampleInput>"Update my sick time yesterday and today to be 4 hours each."</ExampleInput>
-        <ExampleInput>"I only took 4 hours PTO on Aug 5th, not 8."</ExampleInput>
-        <ExampleInput>"Move my sick day from 2024-08-10 to 2024-08-11 and make it 6 hours."</ExampleInput>
+        <ExampleInput>"Log PTO for me on August 5th"</ExampleInput>
+        <ExampleInput>"I'm working from home tomorrow"</ExampleInput>
+        <ExampleInput>"Who's out of office today?"</ExampleInput>
+        <ExampleInput>"Who's working from home next Monday?"</ExampleInput>
+        <ExampleInput>"Who's on PTO on July 15th?"</ExampleInput>
+        <ExampleInput>"Who will be out next Friday?"</ExampleInput>
+        <ExampleInput>"Is anyone working remotely on August 3rd?"</ExampleInput>
+        <ExampleInput>"Delete my PTO for next Friday"</ExampleInput>
+        <ExampleInput>"Update my WFH on Monday to 4 hours"</ExampleInput>
     </Input>
 
     <AvailableTools>
