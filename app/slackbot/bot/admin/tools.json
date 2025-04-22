@@ -1,0 +1,64 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "grant_admin_privileges",
+      "description": "Grants admin privileges to a user by their email address",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The email address of the user to grant admin privileges to"
+          }
+        },
+        "required": ["email"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "revoke_admin_privileges",
+      "description": "Revokes admin privileges from a user by their email address",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The email address of the user to revoke admin privileges from"
+          }
+        },
+        "required": ["email"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_admin_users",
+      "description": "Lists all users with admin privileges",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "check_admin_status",
+      "description": "Checks if a user has admin privileges",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The email address of the user to check admin status for"
+          }
+        },
+        "required": ["email"]
+      }
+    }
+  }
+]

@@ -12,7 +12,7 @@
         <ExampleInput>"What cycle are we in right now?"</ExampleInput>
         <ExampleInput>"What cycle was active on July 30th, 2024?"</ExampleInput>
         <ExampleInput>"When does cycle 1269 start and end?"</ExampleInput>
-        <ExampleInput>"What was the completion percentage for the last cycle?"</ExampleInput>
+        <ExampleInput>"What was the completion percentage?"</ExampleInput>
         <ExampleInput>"Get the details for story #54321"</ExampleInput>
         <ExampleInput>"Find projects related to 'Data Platform'"</ExampleInput>
     </Input>

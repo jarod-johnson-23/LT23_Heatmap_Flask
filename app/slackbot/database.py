@@ -44,6 +44,17 @@ def init_db():
     )
     ''')
     
+    # Check if is_admin column exists, add it if it doesn't
+    cursor.execute("PRAGMA table_info(authenticated_users)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'is_admin' not in columns:
+        print("Adding is_admin column to authenticated_users table")
+        cursor.execute('''
+        ALTER TABLE authenticated_users 
+        ADD COLUMN is_admin INTEGER DEFAULT 0
+        ''')
+    
     # Create table for storing verification codes
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS verification_codes (
@@ -78,6 +89,9 @@ def init_db():
     
     conn.commit()
     conn.close()
+    
+    # After initializing the database, ensure there's at least one admin
+    set_first_user_as_admin()
 
 def is_user_authenticated(slack_user_id):
     """Check if a user is authenticated."""
@@ -259,12 +273,13 @@ def verify_code(slack_user_id, code):
         print(f"TargetProcess ID {targetprocess_id} found for {email}. Authenticating user.")
         cursor.execute(
             """
-            INSERT INTO authenticated_users (slack_user_id, email, targetprocess_id, authenticated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO authenticated_users (slack_user_id, email, targetprocess_id, authenticated_at, is_admin)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0)
             ON CONFLICT(slack_user_id) DO UPDATE SET
                 email=excluded.email,
                 targetprocess_id=excluded.targetprocess_id,
-                authenticated_at=CURRENT_TIMESTAMP
+                authenticated_at=CURRENT_TIMESTAMP,
+                is_admin=excluded.is_admin
             """,
             (slack_user_id, email, targetprocess_id) # Pass the retrieved ID
         )
@@ -505,3 +520,66 @@ def log_tool_usage(function_name: str, user_email: str, slack_id: str):
     finally:
         if conn:
             conn.close() 
+
+def is_user_admin(slack_id):
+    """
+    Check if a user has admin privileges.
+    
+    Args:
+        slack_id: The Slack ID of the user to check
+        
+    Returns:
+        bool: True if the user is an admin, False otherwise
+    """
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        
+        # Query the is_admin column for the given slack_id
+        cursor.execute(
+            "SELECT is_admin FROM authenticated_users WHERE slack_user_id = ?", 
+            (slack_id,)
+        )
+        result = cursor.fetchone()
+        
+        conn.close()
+        
+        # Return True if the user exists and is_admin is 1, False otherwise
+        return result is not None and result[0] == 1
+    except Exception as e:
+        print(f"Error checking admin status for user {slack_id}: {e}")
+        return False 
+
+def set_first_user_as_admin():
+    """
+    Sets the first user in the system as an admin if no admins exist.
+    This ensures there's always at least one admin in the system.
+    """
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        
+        # Check if any admins exist
+        cursor.execute("SELECT COUNT(*) FROM authenticated_users WHERE is_admin = 1")
+        admin_count = cursor.fetchone()[0]
+        
+        if admin_count == 0:
+            # No admins exist, set the first user as admin
+            cursor.execute(
+                "UPDATE authenticated_users SET is_admin = 1 WHERE targetprocess_id = 543"
+            )
+            
+            # Get the email of the user who was made admin
+            cursor.execute(
+                "SELECT email FROM authenticated_users WHERE is_admin = 1 LIMIT 1"
+            )
+            admin_email = cursor.fetchone()
+            
+            if admin_email:
+                print(f"Set first user {admin_email[0]} as admin")
+            
+            conn.commit()
+        
+        conn.close()
+    except Exception as e:
+        print(f"Error setting first user as admin: {e}") 
