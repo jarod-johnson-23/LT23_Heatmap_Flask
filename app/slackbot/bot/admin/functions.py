@@ -240,7 +240,7 @@ def list_admin_users(slack_id=None):
         }
 
 @admin_required
-def check_admin_status(email, slack_id=None):
+def check_admin_status_by_email(email, slack_id=None):
     """
     Checks if a user has admin privileges.
     Only existing admin users can check admin status.

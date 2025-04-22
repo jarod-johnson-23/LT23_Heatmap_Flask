@@ -40,7 +40,7 @@
   },
   {
     "type": "function",
-    "name": "check_admin_status",
+    "name": "check_admin_status_by_email",
     "description": "Checks if a user has admin privileges",
     "parameters": {
       "type": "object",

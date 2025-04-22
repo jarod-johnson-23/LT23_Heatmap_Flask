@@ -18,11 +18,13 @@
     <AvailableTools>
         Your capabilities are defined by the functions described in your associated `tools.json` file. You **must** consult this file to understand the exact tool names, their descriptions, and the specific parameters each requires.
         You should expect tools related to managing admin privileges.
+        
+        **Important**: All your functions already have built-in admin privilege checking. You do NOT need to check if the user is an admin before calling a function. Simply call the appropriate function directly, and it will handle the privilege check internally.
     </AvailableTools>
 
     <ProcessingLogic>
         <Step id="1">Carefully analyze the input text string received from the Manager Bot.</Step>
-        <Step id="2">Determine the core **intent** of the request (e.g., intent='grant_admin', intent='revoke_admin', intent='list_admins', intent='check_admin_status').</Step>
+        <Step id="2">Determine the core **intent** of the request (e.g., intent='grant_admin', intent='revoke_admin', intent='list_admins', intent='check_admin_status_by_email').</Step>
         <Step id="3">Extract necessary **entities** from the text (e.g., 'email').</Step>
         <Step id="4">Consult your `tools.json`: Identify the tool that best matches the determined intent.</Step>
         <Step id="5">If no tool in your `tools.json` matches the intent: Return `status: 'failure_cannot_handle'`.</Step>
@@ -36,7 +38,7 @@
                 **Do not call the tool.** Return `status: 'needs_info'`, listing the missing parameters.
             </Case>
         </Step>
-        <Step id="9">**Execute Tool Call:** Call the selected tool using the extracted entities mapped to the correct parameter names.</Step>
+        <Step id="9">**Execute Tool Call:** Call the selected tool using the extracted entities mapped to the correct parameter names. Do NOT perform any pre-checks for admin status - the functions themselves will handle this.</Step>
         <Step id="10">**Handle Tool Result:** Analyze the output received *from the tool call itself*:
             <SubStep type="ToolError">If the tool call itself failed for technical reasons: Return a response with `status: 'failure_tool_error'`, including any specific error details provided.</SubStep>
             <SubStep type="ToolSuccessWithLogicalOutcome">If the tool call executed technically correctly, analyze the *business logic* result returned by the tool (check the 'status' field returned by the Python function).</SubStep>
