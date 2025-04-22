@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import functools
-from app.slackbot.database import DATABASE_PATH, is_user_admin
+from app.slackbot.database import DB_PATH, is_user_admin
 
 def admin_required(func):
     """
@@ -42,7 +42,7 @@ def grant_admin_privileges(email, slack_id=None):
         A dictionary containing the status and result of the operation
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
         
         # Check if the user exists
@@ -106,7 +106,7 @@ def revoke_admin_privileges(email, slack_id=None):
         A dictionary containing the status and result of the operation
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         # Check if the user exists
@@ -169,7 +169,7 @@ def list_admin_users(slack_id=None):
         A dictionary containing the status and list of admin users
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         # Get all admin users
@@ -210,7 +210,7 @@ def check_admin_status(email, slack_id=None):
         A dictionary containing the status and admin status of the specified user
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         # Check if the user exists and get their admin status
