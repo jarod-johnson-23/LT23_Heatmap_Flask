@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import functools
+import re
 from app.slackbot.database import DB_PATH, is_user_admin
 
 def admin_required(func):
@@ -28,6 +29,56 @@ def admin_required(func):
     
     return wrapper
 
+def extract_email_username(email):
+    """
+    Extracts the username part from an email address.
+    
+    Args:
+        email: The email address to extract from
+        
+    Returns:
+        The username part of the email (before the @)
+    """
+    if '@' in email:
+        return email.split('@')[0]
+    return email  # If no @ found, return the original string
+
+def find_user_by_email_pattern(cursor, email):
+    """
+    Finds a user by a partial email match.
+    
+    Args:
+        cursor: Database cursor
+        email: Email or partial email to search for
+        
+    Returns:
+        The user record if found, None otherwise
+    """
+    # Extract username part (before @)
+    username = extract_email_username(email)
+    
+    # Search for the username part in the email field
+    cursor.execute(
+        "SELECT slack_user_id, email, is_admin FROM authenticated_users WHERE email LIKE ?", 
+        (f"%{username}%",)
+    )
+    
+    users = cursor.fetchall()
+    
+    if not users:
+        return None
+    
+    if len(users) > 1:
+        # If multiple matches, try to find an exact match
+        for user in users:
+            if user[1].lower() == email.lower():
+                return user
+        
+        # If no exact match, return the first match
+        return users[0]
+    
+    return users[0]  # Single match found
+
 @admin_required
 def grant_admin_privileges(email, slack_id=None):
     """
@@ -45,43 +96,39 @@ def grant_admin_privileges(email, slack_id=None):
         conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
         
-        # Check if the user exists
-        cursor.execute(
-            "SELECT slack_user_id, is_admin FROM authenticated_users WHERE email = ?", 
-            (email,)
-        )
-        user = cursor.fetchone()
+        # Find user by email pattern
+        user = find_user_by_email_pattern(cursor, email)
         
         if not user:
             conn.close()
             return {
                 "status": "failure_user_not_found",
-                "reason": f"User with email {email} not found in the system."
+                "reason": f"No user found matching '{email}'."
             }
         
-        user_slack_id, is_admin = user
+        user_slack_id, full_email, is_admin = user
         
         # Check if the user is already an admin
         if is_admin == 1:
             conn.close()
             return {
                 "status": "failure_already_admin",
-                "reason": f"User {email} already has admin privileges."
+                "reason": f"User {full_email} already has admin privileges."
             }
         
         # Grant admin privileges
         cursor.execute(
-            "UPDATE authenticated_users SET is_admin = 1 WHERE email = ?", 
-            (email,)
+            "UPDATE authenticated_users SET is_admin = 1 WHERE slack_user_id = ?", 
+            (user_slack_id,)
         )
         conn.commit()
         conn.close()
         
         return {
             "status": "success",
-            "message": f"Successfully granted admin privileges to {email}.",
+            "message": f"Successfully granted admin privileges to {full_email}.",
             "data": {
-                "email": email,
+                "email": full_email,
                 "is_admin": True
             }
         }
@@ -106,46 +153,42 @@ def revoke_admin_privileges(email, slack_id=None):
         A dictionary containing the status and result of the operation
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
         
-        # Check if the user exists
-        cursor.execute(
-            "SELECT slack_user_id, is_admin FROM authenticated_users WHERE email = ?", 
-            (email,)
-        )
-        user = cursor.fetchone()
+        # Find user by email pattern
+        user = find_user_by_email_pattern(cursor, email)
         
         if not user:
             conn.close()
             return {
                 "status": "failure_user_not_found",
-                "reason": f"User with email {email} not found in the system."
+                "reason": f"No user found matching '{email}'."
             }
         
-        user_slack_id, is_admin = user
+        user_slack_id, full_email, is_admin = user
         
         # Check if the user is not an admin
         if is_admin == 0:
             conn.close()
             return {
                 "status": "failure_not_admin_user",
-                "reason": f"User {email} does not have admin privileges to revoke."
+                "reason": f"User {full_email} does not have admin privileges to revoke."
             }
         
         # Revoke admin privileges
         cursor.execute(
-            "UPDATE authenticated_users SET is_admin = 0 WHERE email = ?", 
-            (email,)
+            "UPDATE authenticated_users SET is_admin = 0 WHERE slack_user_id = ?", 
+            (user_slack_id,)
         )
         conn.commit()
         conn.close()
         
         return {
             "status": "success",
-            "message": f"Successfully revoked admin privileges from {email}.",
+            "message": f"Successfully revoked admin privileges from {full_email}.",
             "data": {
-                "email": email,
+                "email": full_email,
                 "is_admin": False
             }
         }
@@ -169,7 +212,7 @@ def list_admin_users(slack_id=None):
         A dictionary containing the status and list of admin users
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
         
         # Get all admin users
@@ -210,31 +253,29 @@ def check_admin_status(email, slack_id=None):
         A dictionary containing the status and admin status of the specified user
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
         
-        # Check if the user exists and get their admin status
-        cursor.execute(
-            "SELECT slack_user_id, is_admin FROM authenticated_users WHERE email = ?", 
-            (email,)
-        )
-        user = cursor.fetchone()
-        conn.close()
+        # Find user by email pattern
+        user = find_user_by_email_pattern(cursor, email)
         
         if not user:
+            conn.close()
             return {
                 "status": "failure_user_not_found",
-                "reason": f"User with email {email} not found in the system."
+                "reason": f"No user found matching '{email}'."
             }
         
-        user_slack_id, is_admin = user
+        user_slack_id, full_email, is_admin = user
         is_admin_bool = is_admin == 1
+        
+        conn.close()
         
         return {
             "status": "success",
-            "message": f"User {email} {'has' if is_admin_bool else 'does not have'} admin privileges.",
+            "message": f"User {full_email} {'has' if is_admin_bool else 'does not have'} admin privileges.",
             "data": {
-                "email": email,
+                "email": full_email,
                 "is_admin": is_admin_bool
             }
         }
