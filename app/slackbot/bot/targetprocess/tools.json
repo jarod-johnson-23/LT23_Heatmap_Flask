@@ -45,7 +45,7 @@
   {
     "type": "function",
     "name": "get_latest_cycle_completion",
-    "description": "Retrieves the completion statistics (total completed dollars and percentage completed) for the most recently finished development cycle.",
+    "description": "Retrieves the completion statistics (total completed dollars and percentage completed) for the most recently finished development cycle. Also returns a link that needs to be given to the user.",
     "parameters": {
       "type": "object",
       "properties": {},

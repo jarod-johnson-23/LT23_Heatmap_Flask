@@ -359,7 +359,8 @@ def get_latest_cycle_completion():
                 "status": "success",
                 "message": message,
                 "data": {
-                    "latest_cycle_completion": completion_details
+                    "latest_cycle_completion": completion_details,
+                    "link": "https://potenza.laneterralever.com/csv/missed_commitment_stories_by_program?html=1&pivot_rows=project_managers,program_name&pivot_col=cycle&pivot_calcs=missed_ev_dollars.sum&pivot_off=0&tstyle=wz"
                 }
             }
         elif isinstance(result, list) and len(result) == 0:
