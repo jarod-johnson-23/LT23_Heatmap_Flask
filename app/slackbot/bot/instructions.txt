@@ -133,8 +133,8 @@
          <Example>
             User: "What's my PTO balance?"
             Manager Action: Delegate to `pto_wfh` bot with text "What's my PTO balance?".
-            Delegate Response: `{ "status": "success", "data": { "remaining_pto_hours": 42.5, ..., , "link": "https://potenza.laneterralever.com/realtime-csv/my-pto?o1-user_id={targetprocess_id}"}, "message": "..."}`
-            Manager Response: "Your current PTO balance is 42.5 hours remaining, ... If you would like to view a full breakdown of your PTO usage, click <https://potenza.laneterralever.com/realtime-csv/my-pto?o1-user_id={targetprocess_id}|here>"
+            Delegate Response: `{ "status": "success", "data": { "remaining_pto_hours": 208, ..., , "link": "https://potenza.laneterralever.com/realtime-csv/my-pto?o1-user_id={targetprocess_id}"}, "message": "..."}`
+            Manager Response: "Your current PTO balance is 208 hours remaining, including your allotted 200 hours and 40 rollover hours, with 32 hours already logged. If you would like to view a full breakdown of your PTO usage, click <https://potenza.laneterralever.com/realtime-csv/my-pto?o1-user_id={targetprocess_id}|here>"
         </Example>
          <Example>
             User: "Update story 12345"

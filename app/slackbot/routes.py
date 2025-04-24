@@ -103,7 +103,6 @@ scheduler.add_job(
     replace_existing=True
 )
 
-# Start the scheduler
 scheduler.start()
 
 def send_verification_email(recipient_email, code):
@@ -111,30 +110,23 @@ def send_verification_email(recipient_email, code):
     SOURCE_EMAIL = "no-reply@laneterraleverapi.org" # Verified source email address
     AWS_REGION = "us-east-2"  # Matching the dashboard example region
     SUBJECT = "Your LT-AI Slackbot Verification Code"
-    # Simplified body text, similar to dashboard example structure
     BODY_TEXT = (f"Hello,\n\n"
                  f"Your verification code for the LT-AI Slackbot is: {code}\n\n"
                  f"Please enter this code in your Slack chat with the bot to complete authentication.\n"
                  f"If you did not request this code, please ignore this email.")
     CHARSET = "UTF-8"
 
-    # Create a new SES resource, explicitly passing credentials like the dashboard example
     try:
         client = boto3.client(
             "ses",
             region_name=AWS_REGION,
-            aws_access_key_id=os.getenv("aws_access_key_id"), # Explicitly get key
-            aws_secret_access_key=os.getenv("aws_secret_access_key") # Explicitly get secret
+            aws_access_key_id=os.getenv("aws_access_key_id"),
+            aws_secret_access_key=os.getenv("aws_secret_access_key")
         )
     except Exception as e:
          print(f"Error creating boto3 client: {e}")
-         # Handle case where credentials might not be found in env vars
-         # Depending on deployment, relying on IAM roles might be preferable,
-         # but this matches the provided dashboard pattern.
          return False
 
-
-    # Try to send the email.
     try:
         # Provide the contents of the email, using only the Text body like the dashboard example
         response = client.send_email(
@@ -211,12 +203,16 @@ def slack_events():
                     previous_response_id = get_previous_response_id(channel_id)
                     
                     try:
+                        # Initialize the bot manager with the Slack client
+                        bot_manager.slack_client = slack_client
+
                         # Process the message using the bot manager
                         response_obj = bot_manager.process_message(
-                            user_message=text,
-                            user_email=user_email,
-                            slack_id=user_id,
-                            previous_response_id=previous_response_id
+                            text, 
+                            user_email, 
+                            user_id, 
+                            previous_response_id, 
+                            channel_id
                         )
 
                         # Update the response ID using the final response object's ID

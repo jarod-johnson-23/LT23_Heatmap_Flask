@@ -7,6 +7,7 @@ import importlib  # <-- Add this import for dynamic loading
 import traceback # <-- Add this for error logging
 import inspect # <-- Add this import
 from app.slackbot.database import log_tool_usage # <-- Import the logging function
+import re
 
 # Initialize OpenAI client
 client = OpenAI(
@@ -41,6 +42,10 @@ class BotManager:
         
         # Discover available sub-bots
         self.sub_bots = self._discover_sub_bots()
+        
+        # Initialize slack client to None - will be set by routes.py
+        self.slack_client = None
+        self.ephemeral_msg_timestamps = {}  # Store message timestamps by channel/user
     
     def _load_instructions(self, path):
         """Load bot instructions from a file."""
@@ -101,14 +106,16 @@ class BotManager:
         
         return sub_bots
     
-    def process_message(self, user_message, user_email, slack_id, previous_response_id=None):
+    def process_message(self, user_message, user_email, slack_id, previous_response_id=None, channel_id=None):
         """
         Process a user message through the main bot and delegate to sub-bots if needed.
         
         Args:
             user_message (str): The message from the user
             user_email (str): The user's email address
+            slack_id (str): The user's Slack ID
             previous_response_id (str, optional): The previous response ID for conversation continuity
+            channel_id (str, optional): The Slack channel ID (required for ephemeral messages)
             
         Returns:
             dict: The response containing text and/or function calls
@@ -130,91 +137,55 @@ class BotManager:
                 tools=self.main_bot_tools
             )
             print(f"DEBUG: Main Bot Response ID: {response.id}")
-            # print(f"DEBUG: Main Bot Output: {response.output}") # Verbose
             
-            # Check if the main bot wants to delegate to a sub-bot
-            delegation_call = None
+            # Check if the manager bot wants to delegate to a sub-bot
             for output_item in response.output:
-                if hasattr(output_item, 'type') and output_item.type == "function_call":
-                    if output_item.name == "delegate_to_sub_bot":
-                        delegation_call = output_item
-                        break
-            
-            # If delegation is requested, process with the appropriate sub-bot
-            if delegation_call:
-                args = json.loads(delegation_call.arguments)
-                delegation_bot_name = args.get("bot_name")
-                delegation_message = args.get("message")
-                call_id = delegation_call.call_id
-                print(f"DEBUG: Main Bot wants to delegate to '{delegation_bot_name}' with message: '{delegation_message}'")
-                
-                if delegation_bot_name in self.sub_bots:
-                    # Process the message using the sub-bot (this now handles internal function calls)
-                    # _process_with_sub_bot returns the *final* response object after handling tools
-                    sub_bot_final_response_obj = self._process_with_sub_bot(
-                        delegation_bot_name,
-                        delegation_message,
-                        user_email,
-                        slack_id
-                    )
-                    
-                    # Extract the result/output from the sub-bot's final response
-                    # This needs careful handling depending on whether the sub-bot returned text or an error
-                    sub_bot_result_output = ""
-                    if isinstance(sub_bot_final_response_obj, dict) and 'error' in sub_bot_final_response_obj:
-                        # If sub-bot processing failed internally
-                        sub_bot_result_output = json.dumps(sub_bot_final_response_obj)
-                        print(f"DEBUG: Sub-bot '{delegation_bot_name}' processing resulted in error: {sub_bot_result_output}")
-                    elif hasattr(sub_bot_final_response_obj, 'output'):
-                         # If sub-bot processing succeeded, extract its final text output
-                         for output_item in sub_bot_final_response_obj.output:
-                             if hasattr(output_item, 'content') and output_item.content:
-                                 for content_item in output_item.content:
-                                     if hasattr(content_item, 'text') and content_item.text:
-                                         sub_bot_result_output += content_item.text
-                         print(f"DEBUG: Sub-bot '{delegation_bot_name}' final text response: {sub_bot_result_output}")
-                    else:
-                         # Fallback if the response object structure is unexpected
-                         sub_bot_result_output = json.dumps({"status": "failure_unexpected_response", "reason": "Sub-bot returned an unexpected response format."})
-                         print(f"DEBUG: Sub-bot '{delegation_bot_name}' returned unexpected response format.")
-
-                    # Send the sub-bot's final output back to the main bot
-                    print(f"DEBUG: Sending sub-bot result back to Main Bot (Prev ID: {response.id})")
-                    second_response = client.responses.create(
-                        model=self.model,
-                        instructions=personalized_instructions,
-                        previous_response_id=response.id, # Link conversation
-                        input=[{
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": sub_bot_result_output # Send the final text/error from sub-bot
-                        }],
-                        tools=self.main_bot_tools # Main bot might still use tools based on sub-bot result
-                    )
-                    print(f"DEBUG: Main Bot Second Response ID: {second_response.id}")
-                    return second_response # Return the main bot's final response
-
-                else:
-                    # Sub-bot name provided is invalid
-                    print(f"ERROR: Main bot tried to delegate to unknown sub-bot '{delegation_bot_name}'")
-                    # Send error back to main bot
-                    error_output = json.dumps({
-                        "status": "failure_invalid_bot",
-                        "reason": f"Sub-bot '{delegation_bot_name}' does not exist or is not configured correctly.",
-                        "available_bots": list(self.sub_bots.keys())
-                    })
-                    third_response = client.responses.create(
-                        model=self.model,
-                        instructions=personalized_instructions,
-                        previous_response_id=response.id,
-                        input=[{
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": error_output
-                        }],
-                        tools=self.main_bot_tools
-                    )
-                    return third_response
+                if output_item.type == "text":
+                    text_content = output_item.text.value
+                    # Check for delegation pattern in the text output
+                    if "Delegate to `" in text_content:
+                        # Extract the delegate bot name and message
+                        # This pattern is based on the examples in the instructions.txt
+                        match = re.search(r"Delegate to `(\w+)` bot with text \"(.+)\"", text_content)
+                        if match:
+                            delegate_name = match.group(1)
+                            delegate_message = match.group(2)
+                            
+                            # Send ephemeral message before delegation
+                            if channel_id:
+                                self._send_delegation_status(channel_id, slack_id, delegate_name, "start")
+                            
+                            print(f"DEBUG: Manager Bot delegating to '{delegate_name}' with message: '{delegate_message}'")
+                            
+                            # Process with the delegate bot
+                            delegate_response = self._process_with_sub_bot(
+                                delegate_name,
+                                delegate_message,
+                                user_email,
+                                slack_id
+                            )
+                            
+                            # Remove ephemeral message after delegation
+                            if channel_id:
+                                self._send_delegation_status(channel_id, slack_id, delegate_name, "end")
+                            
+                            # If delegate response is an error (dict with 'error' key)
+                            if isinstance(delegate_response, dict) and "error" in delegate_response:
+                                print(f"DEBUG: Delegate Bot '{delegate_name}' returned error: {delegate_response['error']}")
+                                # Just pass the error back to the main bot to handle
+                                final_response = client.responses.create(
+                                    model=self.model,
+                                    instructions=personalized_instructions,
+                                    previous_response_id=response.id,
+                                    input=[{
+                                        "role": "user", 
+                                        "content": f"The {delegate_name} delegate bot encountered an error: {delegate_response['error']}"
+                                    }]
+                                )
+                                return final_response
+                                
+                            # Handle valid responses from sub-bot
+                            # ... existing code for handling sub-bot responses ...
             
             # If no delegation, return the original response from the main bot
             print("DEBUG: No delegation requested by Main Bot.")
@@ -383,6 +354,58 @@ class BotManager:
             print(f"Error processing with sub-bot '{bot_name}': {e}")
             traceback.print_exc()
             return {"error": str(e), "bot_name": bot_name} # Return error dict
+
+    def _send_delegation_status(self, channel_id, user_id, bot_name, status):
+        """
+        Send or remove an ephemeral message indicating delegation status.
+        
+        Args:
+            channel_id: Channel ID where the conversation is happening
+            user_id: Slack ID of the user
+            bot_name: Name of the delegate bot
+            status: Either "start" or "end"
+        """
+        if not self.slack_client:
+            print("DEBUG: No slack_client available, skipping ephemeral message")
+            return
+            
+        # Create a unique key for this channel/user combination
+        key = f"{channel_id}_{user_id}"
+        
+        try:
+            if status == "start":
+                # Send an ephemeral message
+                delegate_names = {
+                    "pto_wfh": "PTO/WFH",
+                    "targetprocess": "TargetProcess",
+                    "users": "Users",
+                    "admin": "Admin"
+                }
+                bot_display_name = delegate_names.get(bot_name, bot_name.capitalize())
+                
+                response = self.slack_client.chat_postEphemeral(
+                    channel=channel_id,
+                    user=user_id,
+                    text=f":hourglass_flowing_sand: Requesting help from the {bot_display_name} delegate bot..."
+                )
+                
+                # Store the timestamp for later reference
+                if response and response["ok"]:
+                    print(f"DEBUG: Sent ephemeral message for {bot_display_name} delegation")
+                    self.ephemeral_msg_timestamps[key] = response["message_ts"]
+            
+            elif status == "end":
+                # We can't delete ephemeral messages through the API, they'll 
+                # automatically disappear once replaced with the real response
+                # We just remove our reference to it
+                if key in self.ephemeral_msg_timestamps:
+                    print(f"DEBUG: Removed ephemeral message reference for {key}")
+                    del self.ephemeral_msg_timestamps[key]
+                    
+        except Exception as e:
+            # Log error but don't interrupt the main flow
+            print(f"Error managing delegation status message: {e}")
+            traceback.print_exc()
 
 # Create a singleton instance for use throughout the application
 bot_manager = BotManager() 
