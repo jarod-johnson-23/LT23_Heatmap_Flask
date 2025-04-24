@@ -2,7 +2,7 @@
   {
     "type": "function",
     "name": "get_pto_balance",
-    "description": "Retrieves the current available Paid Time Off (PTO) balance details (allotted, rollover, logged, upcoming, remaining) for the *requesting user*. Use this when the user asks about their *own* PTO balance, remaining PTO, or available vacation time.",
+    "description": "Retrieves the current available Paid Time Off (PTO) balance details (allotted, rollover, logged, upcoming, remaining) for the *requesting user*. Use this when the user asks about their *own* PTO balance, remaining PTO, or available vacation time. Function result also includes a URL to download a report of their PTO usage.",
     "parameters": {
       "type": "object",
       "properties": {},

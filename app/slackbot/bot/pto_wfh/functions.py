@@ -111,7 +111,8 @@ def get_pto_balance(slack_id: str):
                     "rollover_hours": rollover,
                     "logged_pto_hours": logged,
                     "upcoming_pto_hours": upcoming,
-                    "remaining_pto_hours": round(remaining, 2) # Round to 2 decimal places
+                    "remaining_pto_hours": round(remaining, 2),
+                    "link": f"https://potenza.laneterralever.com/realtime-csv/my-pto?o1-user_id={targetprocess_id}"
                 }
             }
         elif isinstance(result, list) and len(result) == 0:
