@@ -203,16 +203,12 @@ def slack_events():
                     previous_response_id = get_previous_response_id(channel_id)
                     
                     try:
-                        # Initialize the bot manager with the Slack client
-                        bot_manager.slack_client = slack_client
-
                         # Process the message using the bot manager
                         response_obj = bot_manager.process_message(
-                            text, 
-                            user_email, 
-                            user_id, 
-                            previous_response_id, 
-                            channel_id
+                            user_message=text,
+                            user_email=user_email,
+                            slack_id=user_id,
+                            previous_response_id=previous_response_id
                         )
 
                         # Update the response ID using the final response object's ID
