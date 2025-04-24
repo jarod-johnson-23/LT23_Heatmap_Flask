@@ -3,6 +3,7 @@ import os
 import functools
 import re
 from app.slackbot.database import DB_PATH, is_user_admin
+import requests
 
 def admin_required(func):
     """
@@ -283,5 +284,48 @@ def check_admin_status_by_email(email, slack_id=None):
         return {
             "status": "failure_tool_error",
             "reason": "An error occurred while checking admin status.",
+            "error_details": str(e)
+        }
+
+@admin_required
+def restart_opsdb(slack_id=None):
+    """
+    Restarts the OpsDB database and initiates a fresh data pull.
+    
+    Args:
+        slack_id: The Slack ID of the user making the request (implicitly provided)
+        
+    Returns:
+        A dictionary containing the status and result message
+    """
+    try:
+        # Define the API endpoint
+        api_url = "https://potenza.laneterralever.com/process-op"
+        
+        # Define the form data
+        form_data = {
+            "title": "Ops Support Tools",
+            "op_name": "OpsDB Restart Tool"
+        }
+        
+        # Make the POST request
+        response = requests.post(api_url, data=form_data)
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            return {
+                "status": "success",
+                "message": "OpsDB restart initiated successfully. The database will refresh with fresh data shortly."
+            }
+        else:
+            return {
+                "status": "failure_tool_error",
+                "reason": f"Failed to restart OpsDB. API returned status code: {response.status_code}",
+                "error_details": response.text
+            }
+    except Exception as e:
+        return {
+            "status": "failure_tool_error",
+            "reason": "An error occurred while attempting to restart OpsDB.",
             "error_details": str(e)
         }

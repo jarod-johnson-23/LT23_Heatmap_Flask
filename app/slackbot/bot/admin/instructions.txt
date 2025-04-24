@@ -13,6 +13,9 @@
         <ExampleInput>"Remove admin privileges from user jane.smith@example.com"</ExampleInput>
         <ExampleInput>"List all admin users"</ExampleInput>
         <ExampleInput>"Check if user bob.johnson@example.com is an admin"</ExampleInput>
+        <ExampleInput>"Restart the OpsDB database"</ExampleInput>
+        <ExampleInput>"Refresh OpsDB data"</ExampleInput>
+        <ExampleInput>"Initiate OpsDB refresh"</ExampleInput>
     </Input>
 
     <AvailableTools>
@@ -70,6 +73,9 @@
         </Example>
         <Example type="Not Admin">
             `{ "status": "failure_not_admin", "reason": "You do not have admin privileges to perform this action." }`
+        </Example>
+        <Example type="Success (Restart OpsDB)">
+            `{ "status": "success", "message": "OpsDB restart initiated successfully. The database will refresh with fresh data shortly." }`
         </Example>
     </OutputFormat>
 

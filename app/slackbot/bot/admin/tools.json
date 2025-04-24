@@ -52,5 +52,14 @@
       },
       "required": ["email"]
     }
+  },
+  {
+    "type": "function",
+    "name": "restart_opsdb",
+    "description": "Restarts the OpsDB database and initiates a fresh data pull. This operation may take several minutes to complete but the result from this function will let you know if the restart was initiated or not. Use this when the database needs to be refreshed with the latest data.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
   }
 ]
