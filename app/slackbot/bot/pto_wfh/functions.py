@@ -153,8 +153,10 @@ def get_users_on_pto_today(slack_id=None):
     Returns:
         A dictionary containing the status and list of users on PTO today
     """
-    # Call the new function with today's date
-    return get_users_on_pto_by_date(date=None, slack_id=slack_id)
+    # Get current date in YYYY-MM-DD format
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    # Call the helper function with today's date
+    return get_users_on_pto_by_date(date=current_date, slack_id=slack_id)
 
 def get_users_wfh_today(slack_id=None):
     """
@@ -167,8 +169,10 @@ def get_users_wfh_today(slack_id=None):
     Returns:
         A dictionary containing the status and list of users working from home today
     """
-    # Call the new function with today's date
-    return get_users_wfh_by_date(date=None, slack_id=slack_id)
+    # Get current date in YYYY-MM-DD format
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    # Call the helper function with today's date
+    return get_users_wfh_by_date(date=current_date, slack_id=slack_id)
 
 # --- Functions to Get Upcoming PTO/WFH by Name ---
 def get_upcoming_pto_by_name(name: str):
