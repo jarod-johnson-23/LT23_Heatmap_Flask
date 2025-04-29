@@ -94,9 +94,9 @@ def perform_asr(file_path, prompt=""):
             )
         return [
             {
-                'start_time': segment['start'],
-                'end_time': segment['end'],
-                'text': segment['text']
+                'start_time': segment.start,
+                'end_time': segment.end,
+                'text': segment.text
             }
             for segment in response.segments
         ]
@@ -155,9 +155,9 @@ def perform_asr(file_path, prompt=""):
         offset_sec = chunk_start / 1000.0
         for segment in response.segments:
             transcription_details.append({
-                'start_time': segment['start'] + offset_sec,
-                'end_time': segment['end'] + offset_sec,
-                'text': segment['text']
+                'start_time': segment.start + offset_sec,
+                'end_time': segment.end + offset_sec,
+                'text': segment.text
             })
     
     return transcription_details
