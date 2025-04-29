@@ -5,22 +5,15 @@ import requests
 import re
 from datetime import datetime
 from collections import defaultdict
-from openai import OpenAI
 from pydub import AudioSegment
 from tempfile import NamedTemporaryFile
 import subprocess
 
 transcript_bp = Blueprint("transcript_bp", __name__)
 
-
 from . import routes
 
 TRANSCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "files")
-
-client = OpenAI(
-    organization=os.getenv("openai_organization"),
-    api_key=os.getenv("openai_api_key"),
-)
 
 def log_to_file(message):
     log_file_path = os.path.join(current_app.root_path, 'transcription/logs/log.txt')
@@ -28,209 +21,123 @@ def log_to_file(message):
     with open(log_file_path, 'a') as log_file:
         log_file.write(f"{datetime.now()}: {message}\n")
 
-def speaker_diarization(file_path):
-  api_key = os.getenv('deepgram_api_key')
+def perform_transcription_with_diarization(file_path):
+    api_key = os.getenv('deepgram_api_key')
 
-  # Construct the API endpoint
-  url = 'https://api.deepgram.com/v1/listen'
-  params = {
-      'diarize': 'true',
-      'punctuate': 'true',
-      'utterances': 'true'
-  }
-  headers = {
-      'Authorization': f'Token {api_key}',
-      'Content-Type': 'audio/mp3'
-  }
+    # Construct the API endpoint
+    url = 'https://api.deepgram.com/v1/listen'
+    params = {
+        'model': 'nova-3',
+        'smart_format': 'true',
+        'diarize': 'true'
+    }
+    headers = {
+        'Authorization': f'Token {api_key}',
+        'Content-Type': 'audio/mpeg'
+    }
 
-  # Open the file in binary read mode
-  with open(file_path, 'rb') as file:
-      # Make the API request
-      response = requests.post(url, headers=headers, params=params, data=file)
+    # Open the file in binary read mode
+    with open(file_path, 'rb') as file:
+        # Make the API request
+        response = requests.post(url, headers=headers, params=params, data=file)
       
-  # Check for successful response
-  if response.status_code == 200:
-      # Parse the JSON response
-      response_json = response.json()
-      # Extract utterances
-      utterances = response_json.get('results', {}).get('utterances', [])
-      
-      # List to hold speaker IDs and timestamps
-      speaker_details = []
-      
-      # Collect speaker ID and timestamps
-      for utterance in utterances:
-          speaker_id = utterance.get('speaker')
-          timestamp = utterance.get('start')
-          end_timestamp = utterance.get('end')
-          
-          speaker_detail = {
-              'speaker_id': speaker_id,
-              'start_timestamp': timestamp,
-              'end_timestamp': end_timestamp
-          }
-          
-          speaker_details.append(speaker_detail)
-      # Now speaker_details contains the requested information
-      log_to_file(speaker_details)
-      return speaker_details
-  else:
-      print(f"Error: API request failed with status code {response.status_code}")
-
-MAX_FILE_SIZE = 26214400  # 26 MB in bytes
-
-def perform_asr(file_path, prompt=""):
-    original_file_size = os.path.getsize(file_path)
-    
-    # If the original file is within the limit, process it directly.
-    if original_file_size <= MAX_FILE_SIZE:
-        with open(file_path, "rb") as audio_file:
-            response = client.audio.transcriptions.create(
-                file=audio_file,
-                model="whisper-1",
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-                language="en",
-            )
-        return [
-            {
-                'start_time': segment.start,
-                'end_time': segment.end,
-                'text': segment.text
-            }
-            for segment in response.segments
-        ]
-    
-    # Otherwise, split the audio file into chunks.
-    # Load the audio file using pydub.
-    audio = AudioSegment.from_file(file_path)
-    duration_ms = len(audio)
-    
-    # Determine the properties of the audio.
-    # When exporting to WAV, the file size is roughly:
-    #   bytes_per_second = frame_rate * channels * sample_width
-    # So the maximum allowed duration in seconds is:
-    frame_rate = audio.frame_rate
-    channels = audio.channels
-    sample_width = audio.sample_width  # in bytes
-    bytes_per_second = frame_rate * channels * sample_width
-
-    # Use a safety margin (e.g. 95% of the max size) to account for any overhead.
-    max_duration_seconds = 0.95 * (MAX_FILE_SIZE / bytes_per_second)
-    chunk_duration_ms = int(max_duration_seconds * 1000)
-    if chunk_duration_ms <= 0:
-        raise ValueError("Calculated chunk duration is too small. Check file properties.")
-
-    transcription_details = []
-    
-    # Process each chunk.
-    for chunk_start in range(0, duration_ms, chunk_duration_ms):
-        chunk_end = min(chunk_start + chunk_duration_ms, duration_ms)
-        audio_chunk = audio[chunk_start:chunk_end]
+    # Check for successful response
+    if response.status_code == 200:
+        # Parse the JSON response
+        response_json = response.json()
         
-        # Export the chunk to a temporary WAV file.
-        with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_filename = tmp.name
-            audio_chunk.export(tmp_filename, format="wav")
+        # Extract words with speaker information and timestamps
+        words = response_json.get('results', {}).get('channels', [])[0].get('alternatives', [])[0].get('words', [])
         
-        # Verify that the exported chunk is below the size limit.
-        chunk_file_size = os.path.getsize(tmp_filename)
-        if chunk_file_size > MAX_FILE_SIZE:
-            os.remove(tmp_filename)
-            raise ValueError(f"Exported chunk file size ({chunk_file_size} bytes) exceeds MAX_FILE_SIZE. "
-                             "Try reducing the chunk duration or using a different format.")
+        # Process the words to create both speaker segments and transcription details
+        speaker_results = []
+        transcription_details = []
         
-        # Call the transcription API on the chunk.
-        with open(tmp_filename, "rb") as chunk_file:
-            response = client.audio.transcriptions.create(
-                file=chunk_file,
-                model="whisper-1",
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-                language="en",
-            )
-        os.remove(tmp_filename)
+        # Group words by speaker and create segments
+        current_speaker = None
+        current_segment_start = None
+        current_segment_text = []
         
-        # Adjust the segment timestamps by adding the offset for this chunk.
-        offset_sec = chunk_start / 1000.0
-        for segment in response.segments:
-            transcription_details.append({
-                'start_time': segment.start + offset_sec,
-                'end_time': segment.end + offset_sec,
-                'text': segment.text
+        for word in words:
+            speaker_id = word.get('speaker')
+            start_time = word.get('start')
+            end_time = word.get('end')
+            text = word.get('punctuated_word', word.get('word'))
+            
+            # If this is a new speaker or the first word
+            if current_speaker != speaker_id or current_segment_start is None:
+                # Save the previous segment if it exists
+                if current_speaker is not None and current_segment_text:
+                    # Add to speaker_results
+                    speaker_results.append({
+                        'speaker_id': current_speaker,
+                        'start_timestamp': current_segment_start,
+                        'end_timestamp': end_time
+                    })
+                    
+                    # Add to transcription_details
+                    segment_text = ' '.join(current_segment_text)
+                    transcription_details.append({
+                        'start_time': current_segment_start,
+                        'end_time': end_time,
+                        'text': segment_text
+                    })
+                
+                # Start a new segment
+                current_speaker = speaker_id
+                current_segment_start = start_time
+                current_segment_text = [text]
+            else:
+                # Continue the current segment
+                current_segment_text.append(text)
+        
+        # Don't forget the last segment
+        if current_speaker is not None and current_segment_text:
+            speaker_results.append({
+                'speaker_id': current_speaker,
+                'start_timestamp': current_segment_start,
+                'end_timestamp': end_time
             })
-    
-    return transcription_details
-
+            
+            segment_text = ' '.join(current_segment_text)
+            transcription_details.append({
+                'start_time': current_segment_start,
+                'end_time': end_time,
+                'text': segment_text
+            })
+        
+        log_to_file(f"Processed {len(words)} words into {len(speaker_results)} speaker segments and {len(transcription_details)} transcript segments")
+        return speaker_results, transcription_details
+    else:
+        error_msg = f"Error: Deepgram API request failed with status code {response.status_code}"
+        log_to_file(error_msg)
+        print(error_msg)
+        return None, None
 
 def combine_speaker_and_transcription(speaker_results, transcription_details):
     combined_transcript = []
     speaker_lines = {}  # To hold the lines spoken by each speaker
 
-    def calculate_overlap(speaker_start, speaker_end, trans_start, trans_end):
-        overlap_start = max(speaker_start, trans_start)
-        overlap_end = min(speaker_end, trans_end)
-        overlap_duration = max(0, overlap_end - overlap_start)
-        return overlap_duration
-
-    for transcription in transcription_details:
-        trans_start = transcription['start_time']
-        trans_end = transcription['end_time']
-
-        # Normalize the speaker segments based on the current transcription start time
-        normalized_speaker_results = [
-            {
-                'speaker_id': speaker['speaker_id'],
-                'start_timestamp': speaker['start_timestamp'] - trans_start,
-                'end_timestamp': speaker['end_timestamp'] - trans_start
-            }
-            for speaker in speaker_results
-        ]
-
-        # Normalize the transcription segment so it starts at 0
-        normalized_trans_start = 0
-        normalized_trans_end = trans_end - trans_start
-
-        # Generate list of (speaker, overlap_time) tuples
-        overlap_list = [
-            (
-                speaker['speaker_id'], 
-                calculate_overlap(
-                    speaker['start_timestamp'], 
-                    speaker['end_timestamp'], 
-                    normalized_trans_start, 
-                    normalized_trans_end
-                )
-            )
-            for speaker in normalized_speaker_results
-        ]
-
-        # Find the maximum overlap time
-        max_overlap = max([time for _, time in overlap_list], default=0)
-
-        # Determine the speakers with considerable overlaps > 50% of max overlap time
-        chosen_speakers = {
-            speaker_id for speaker_id, overlap_time in overlap_list 
-            if overlap_time >= 0.5 * max_overlap and overlap_time > 0
-        }
-
-        # Create the output structure if speakers have been identified
-        if chosen_speakers:
+    # Since our speaker_results and transcription_details are already aligned,
+    # we can simply combine them based on their indices
+    for i, transcription in enumerate(transcription_details):
+        if i < len(speaker_results):
+            speaker_id = speaker_results[i]['speaker_id']
+            
             combined_segment = {
-                'speaker_ids': list(chosen_speakers),
-                'start_time': transcription['start_time'],  # Use original (unnormalized) time for output
-                'end_time': transcription['end_time'],  # Use original (unnormalized) time for output
+                'speaker_ids': [speaker_id],
+                'start_time': transcription['start_time'],
+                'end_time': transcription['end_time'],
                 'text': transcription['text']
             }
             combined_transcript.append(combined_segment)
             
             # Record the lines for speaker summaries
-            for speaker_id in chosen_speakers:
-                if speaker_id not in speaker_lines:
-                    speaker_lines[speaker_id] = []
-                speaker_lines[speaker_id].append(transcription['text'])
+            if speaker_id not in speaker_lines:
+                speaker_lines[speaker_id] = []
+            speaker_lines[speaker_id].append(transcription['text'])
         else:
-            print(f"No speaker found for the segment {trans_start}s - {trans_end}s.")
+            print(f"No speaker found for the segment {transcription['start_time']}s - {transcription['end_time']}s.")
     
     # Generate speaker summaries with the first few lines
     speaker_summaries = {f"Speaker {speaker_id}": " ".join(lines[:3]) for speaker_id, lines in speaker_lines.items()}
@@ -242,6 +149,9 @@ def display_transcript(transcript_data, base_filename):
     transcript_filename = f"{base_filename}_transcript.txt"
     
     transcript_file_path = os.path.join(current_app.root_path, 'transcription/files/transcripts', transcript_filename)
+    
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(transcript_file_path), exist_ok=True)
     
     with open(transcript_file_path, 'w') as file:
         # Initialize previous speaker and start time for combining segments
@@ -322,7 +232,7 @@ def init_transcription():
         return jsonify({"error": "No file part"}), 400
 
     audio_file = request.files['audio_input']
-    prompt = request.form.get('prompt')
+    prompt = request.form.get('prompt')  # Keep this for compatibility even though we're not using it
 
     if audio_file.filename == '':
         return jsonify({"error": "No selected file"}), 400
@@ -345,8 +255,12 @@ def init_transcription():
             if audio_file_path is None:
                 return jsonify({"error": "Failed to convert file to MP3"}), 400
 
-        speaker_results = speaker_diarization(audio_file_path)
-        transcription_details = perform_asr(audio_file_path, prompt)
+        # Process with Deepgram for both transcription and diarization
+        speaker_results, transcription_details = perform_transcription_with_diarization(audio_file_path)
+        
+        if not speaker_results or not transcription_details:
+            return jsonify({"error": "Failed to process audio file"}), 500
+            
         full_transcript, speaker_summaries = combine_speaker_and_transcription(speaker_results, transcription_details)
         
         # Call the display_transcript function to format and save the transcript
@@ -361,8 +275,6 @@ def init_transcription():
     else:
         return jsonify({"error": "File type not allowed"}), 400
 
-
-
 def process_transcript_file(file_path):
     # Create a dictionary to store the dialogues
     speaker_dialogues = defaultdict(str)
@@ -372,7 +284,7 @@ def process_transcript_file(file_path):
         content = file.read()
     
     # Regular expression to match speaker patterns and capture multiline dialogue
-    pattern = re.compile(r'\[Speaker (\d+)(?: & Speaker \d+)?\] \(\d+\.\d+s - \d+\.\d+s\):\n(.*?)(?=\n\[|\n{2,}|\Z)', re.DOTALL)
+    pattern = re.compile(r'\[Speaker (\d+)(?: & Speaker \d+)?\] \(\d+:\d+ - \d+:\d+\):\n(.*?)(?=\n\[|\n{2,}|\Z)', re.DOTALL)
     
     matches = pattern.findall(content)
     
