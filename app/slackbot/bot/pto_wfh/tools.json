@@ -13,7 +13,7 @@
   {
     "type": "function",
     "name": "get_users_on_pto_today",
-    "description": "Gets a list of all employees who are marked as being on Paid Time Off (PTO) for the current date (today). Use this when asked 'who is out today?', 'who is on vacation today?', 'is anyone out?', etc.",
+    "description": "Gets a list of all employees who are marked as being on Paid Time Off (PTO) for the current date (today). Use this when asked 'who is out today?', 'who is on vacation today?', 'is anyone out?', etc. This also includes people using Sick time.",
     "parameters": {
       "type": "object",
       "properties": {},
@@ -24,7 +24,7 @@
   {
     "type": "function",
     "name": "get_users_on_pto_by_date",
-    "description": "Gets a list of all employees who are marked as being on Paid Time Off (PTO) for a specific date. Use this when asked 'who is out on [specific date]?', 'who is on vacation next Monday?', etc.",
+    "description": "Gets a list of all employees who are marked as being on Paid Time Off (PTO) for a specific date. Use this when asked 'who is out on [specific date]?', 'who is on vacation next Monday?', etc. This also includes people using Sick time.",
     "parameters": {
       "type": "object",
       "properties": {
