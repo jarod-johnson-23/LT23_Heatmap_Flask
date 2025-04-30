@@ -98,9 +98,9 @@ def get_pto_balance(slack_id: str):
 
             # Calculate remaining PTO
             # Remaining = (Starting Allotment + Rollover) - Logged Hours - Upcoming Hours
-            remaining = (allotted + rollover) - logged - upcoming
+            remaining = (allotted + rollover) - logged
 
-            print(f"DEBUG: PTO Calculation: ({allotted} + {rollover}) - {logged} - {upcoming} = {remaining}")
+            print(f"DEBUG: PTO Calculation: ({allotted} + {rollover}) - {logged} = {remaining}")
 
             # 5. Format success response
             return {
