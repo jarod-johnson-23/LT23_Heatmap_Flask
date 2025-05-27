@@ -41,7 +41,6 @@ def load_embeddings(csv_path="pdf_embeddings.csv"):
 # Load once globally (avoid re-loading on every request)
 EMBEDDINGS_DF = load_embeddings("./app/audiobot/embeddings/pdf_embeddings.csv")
 
-
 ##############################
 # Utility Functions
 ##############################

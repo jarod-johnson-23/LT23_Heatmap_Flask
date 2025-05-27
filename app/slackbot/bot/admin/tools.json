@@ -61,5 +61,32 @@
       "type": "object",
       "properties": {}
     }
+  },
+  {
+    "type": "function",
+    "name": "start_acting_as_user",
+    "description": "Allows an admin to start acting as another user. Provide either first_name, last_name, or both to identify the user.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "first_name": {
+          "type": "string",
+          "description": "The first name of the user to act as (optional if last_name is provided)"
+        },
+        "last_name": {
+          "type": "string",
+          "description": "The last name of the user to act as (optional if first_name is provided)"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "name": "stop_acting_as_user",
+    "description": "Allows an admin to stop their current 'acting as' session and revert to their own identity.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
   }
 ]

@@ -2,7 +2,7 @@ import sqlite3
 import os
 import functools
 import re
-from app.slackbot.database import DB_PATH, is_user_admin
+from app.slackbot.database import DB_PATH, is_user_admin, add_acting_as_log, delete_acting_as_log, get_acting_as_user_id, get_user_email, find_user_by_name_parts
 import requests
 
 def admin_required(func):
@@ -328,4 +328,81 @@ def restart_opsdb(slack_id=None):
             "status": "failure_tool_error",
             "reason": "An error occurred while attempting to restart OpsDB.",
             "error_details": str(e)
+        }
+
+@admin_required
+def start_acting_as_user(first_name=None, last_name=None, slack_id=None):
+    """
+    Allows an admin to start acting as another user.
+    The admin's slack_id is used to record who is initiating the action.
+    The first_name and/or last_name are used to find the target user.
+    """
+    if not first_name and not last_name:
+        return {
+            "status": "failure_missing_parameters",
+            "reason": "You must provide either a first name or a last name for the user."
+        }
+
+    # Find the user to act as
+    user_data, error_message = find_user_by_name_parts(first_name=first_name, last_name=last_name)
+
+    if error_message:
+        # This covers both "user not found" and actual database errors from find_user_by_name_parts
+        return {
+            "status": "failure_user_not_found" if "No authenticated user was found" in error_message else "failure_tool_error",
+            "reason": error_message
+        }
+    
+    if not user_data:
+        # Should be caught by error_message, but as a safeguard
+        return {
+            "status": "failure_user_not_found",
+            "reason": "Could not find the specified user."
+        }
+
+    target_user_slack_id, target_user_email, _ = user_data # We have slack_id, email, tp_id
+
+    # Add the acting_as log entry
+    success, db_error = add_acting_as_log(admin_slack_id=slack_id, user_slack_id=target_user_slack_id)
+
+    if not success:
+        return {
+            "status": "failure_tool_error",
+            "reason": "Failed to record 'acting as' session in the database.",
+            "error_details": db_error
+        }
+
+    admin_email = get_user_email(slack_id) # Get admin's email for the message
+
+    return {
+        "status": "success",
+        "message": f"Admin '{admin_email if admin_email else slack_id}' is now acting as user '{target_user_email}' (Slack ID: {target_user_slack_id}).",
+        "data": {
+            "acting_as_user_email": target_user_email,
+            "acting_as_user_slack_id": target_user_slack_id,
+            "admin_slack_id": slack_id
+        }
+    }
+
+@admin_required
+def stop_acting_as_user(slack_id=None):
+    """
+    Allows an admin to stop acting as another user.
+    The admin's slack_id is used to identify the session to stop.
+    """
+    admin_email = get_user_email(slack_id) # Get admin's email for the message
+    success, message = delete_acting_as_log(admin_slack_id=slack_id)
+
+    if success:
+        return {
+            "status": "success",
+            "message": f"Admin '{admin_email if admin_email else slack_id}' has stopped acting as another user."
+        }
+    else:
+        # 'message' from delete_acting_as_log will contain either the specific reason 
+        # (e.g., "No active 'acting as' session...") or a DB error string.
+        status_code = "failure_not_acting_as" if "No active 'acting as' session" in (message or "") else "failure_tool_error"
+        return {
+            "status": status_code,
+            "reason": message if message else "Failed to stop 'acting as' session due to an unexpected error."
         }

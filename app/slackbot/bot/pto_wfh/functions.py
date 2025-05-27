@@ -2,7 +2,7 @@ import os
 import json
 import traceback
 from datetime import datetime, date, timezone
-from app.slackbot.database import get_targetprocess_id_by_slack_id # Import the new helper
+from app.slackbot.database import get_targetprocess_id_by_slack_id, get_acting_as_user_id # Import the new helper
 from app.slackbot.potenza import potenza_api # Import the Potenza API instance
 import re
 import requests
@@ -51,6 +51,13 @@ def get_pto_balance(slack_id: str):
     Returns:
         A dictionary containing the status and PTO balance details or an error message.
     """
+    # Check if an admin is acting as another user
+    original_admin_slack_id = slack_id
+    acting_as_user_id = get_acting_as_user_id(admin_slack_id=original_admin_slack_id)
+    if acting_as_user_id:
+        print(f"INFO: Admin '{original_admin_slack_id}' is acting as user '{acting_as_user_id}' for get_pto_balance.")
+        slack_id = acting_as_user_id
+
     print(f"Executing get_pto_balance for slack_id: {slack_id}")
 
     # 1. Get TargetProcess ID from SQLite DB using slack_id
@@ -391,6 +398,13 @@ def log_time_entry(slack_id: str, time_type: str, entries: list):
     Returns:
         A dictionary containing the overall status and results for each logging attempt.
     """
+    # Check if an admin is acting as another user
+    original_admin_slack_id = slack_id
+    acting_as_user_id = get_acting_as_user_id(admin_slack_id=original_admin_slack_id)
+    if acting_as_user_id:
+        print(f"INFO: Admin '{original_admin_slack_id}' is acting as user '{acting_as_user_id}' for log_time_entry ({time_type}).")
+        slack_id = acting_as_user_id
+
     print(f"Executing log_time_entry for Slack ID: {slack_id}, Type: {time_type}, Entries: {entries}")
 
     # --- Input Validation ---
@@ -580,6 +594,13 @@ def delete_time_entry(slack_id: str, time_type: str, dates_to_delete: list):
     Returns:
         A dictionary containing the overall status and results for each deletion attempt.
     """
+    # Check if an admin is acting as another user
+    original_admin_slack_id = slack_id
+    acting_as_user_id = get_acting_as_user_id(admin_slack_id=original_admin_slack_id)
+    if acting_as_user_id:
+        print(f"INFO: Admin '{original_admin_slack_id}' is acting as user '{acting_as_user_id}' for delete_time_entry ({time_type}).")
+        slack_id = acting_as_user_id
+
     print(f"Executing delete_time_entry for Slack ID: {slack_id}, Type: {time_type}, Dates: {dates_to_delete}")
 
     # --- Input Validation ---
@@ -780,6 +801,13 @@ def update_time_entry(slack_id: str, time_type: str, updates: list):
     Returns:
         A dictionary containing the overall status and detailed results for each update attempt.
     """
+    # Check if an admin is acting as another user
+    original_admin_slack_id = slack_id
+    acting_as_user_id = get_acting_as_user_id(admin_slack_id=original_admin_slack_id)
+    if acting_as_user_id:
+        print(f"INFO: Admin '{original_admin_slack_id}' is acting as user '{acting_as_user_id}' for update_time_entry ({time_type}).")
+        slack_id = acting_as_user_id
+
     print(f"Executing update_time_entry for Slack ID: {slack_id}, Type: {time_type}, Updates: {updates}")
 
     # --- Input Validation ---

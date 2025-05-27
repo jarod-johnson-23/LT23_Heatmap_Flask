@@ -87,6 +87,16 @@ def init_db():
     )
     ''')
     
+    # Create table for tracking admins acting as other users
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS acting_as_log (
+        admin_slack_id TEXT NOT NULL,
+        user_slack_id TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (admin_slack_id, user_slack_id)
+    )
+    """)
+    
     conn.commit()
     conn.close()
     
@@ -583,3 +593,152 @@ def set_first_user_as_admin():
         conn.close()
     except Exception as e:
         print(f"Error setting first user as admin: {e}") 
+
+def add_acting_as_log(admin_slack_id: str, user_slack_id: str):
+    """Adds or updates an entry in the acting_as_log table."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        
+        # Delete any existing entry for this admin
+        cursor.execute(
+            "DELETE FROM acting_as_log WHERE admin_slack_id = ?",
+            (admin_slack_id,)
+        )
+        
+        # Insert the new entry
+        cursor.execute(
+            """
+            INSERT INTO acting_as_log (admin_slack_id, user_slack_id, created_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            """,
+            (admin_slack_id, user_slack_id)
+        )
+        conn.commit()
+        print(f"DEBUG: Added acting_as_log: Admin='{admin_slack_id}', User='{user_slack_id}'")
+        return True, None
+    except sqlite3.Error as e:
+        print(f"ERROR: Failed to add acting_as_log for admin '{admin_slack_id}', user '{user_slack_id}': {e}")
+        if conn:
+            conn.rollback()
+        return False, str(e)
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred during add_acting_as_log: {e}")
+        if conn:
+            conn.rollback()
+        return False, str(e)
+    finally:
+        if conn:
+            conn.close()
+
+def delete_acting_as_log(admin_slack_id: str):
+    """Deletes an entry from the acting_as_log table for a given admin."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM acting_as_log WHERE admin_slack_id = ?",
+            (admin_slack_id,)
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        if deleted_count > 0:
+            print(f"DEBUG: Deleted acting_as_log for admin '{admin_slack_id}'")
+            return True, None
+        else:
+            print(f"DEBUG: No acting_as_log entry found to delete for admin '{admin_slack_id}'")
+            return False, "No active 'acting as' session found for this admin."
+    except sqlite3.Error as e:
+        print(f"ERROR: Failed to delete acting_as_log for admin '{admin_slack_id}': {e}")
+        if conn:
+            conn.rollback()
+        return False, str(e)
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred during delete_acting_as_log: {e}")
+        if conn:
+            conn.rollback()
+        return False, str(e)
+    finally:
+        if conn:
+            conn.close() 
+
+def get_acting_as_user_id(admin_slack_id: str):
+    """Retrieves the user_slack_id an admin is currently acting as."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT user_slack_id FROM acting_as_log WHERE admin_slack_id = ?",
+            (admin_slack_id,)
+        )
+        result = cursor.fetchone()
+        if result:
+            print(f"DEBUG: Admin '{admin_slack_id}' is acting as user '{result[0]}'")
+            return result[0]
+        else:
+            print(f"DEBUG: Admin '{admin_slack_id}' is not currently acting as any user.")
+            return None
+    except sqlite3.Error as e:
+        print(f"ERROR: Database error fetching acting_as_user_id for admin '{admin_slack_id}': {e}")
+        return None
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred during get_acting_as_user_id for admin '{admin_slack_id}': {e}")
+        return None
+    finally:
+        if conn:
+            conn.close() 
+
+def find_user_by_name_parts(first_name: str = None, last_name: str = None):
+    """Finds a user in authenticated_users by first and/or last name from their email."""
+    if not first_name and not last_name:
+        return None, "Either first name or last name must be provided."
+
+    conn = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+
+        query_parts = []
+        params = []
+
+        if first_name and last_name:
+            # Search for firstname.lastname@
+            pattern = f"{first_name.lower()}.{last_name.lower()}@%"
+            query_parts.append("LOWER(email) LIKE ?")
+            params.append(pattern)
+        elif first_name:
+            # Search for firstname.%@
+            pattern = f"{first_name.lower()}.%@%"
+            query_parts.append("LOWER(email) LIKE ?")
+            params.append(pattern)
+        elif last_name:
+            # Search for %.lastname@
+            pattern = f"%.{last_name.lower()}@%"
+            query_parts.append("LOWER(email) LIKE ?")
+            params.append(pattern)
+
+        sql_query = f"SELECT slack_user_id, email, targetprocess_id FROM authenticated_users WHERE {' AND '.join(query_parts)}"
+        
+        cursor.execute(sql_query, tuple(params))
+        result = cursor.fetchone()
+
+        if result:
+            # result will be a tuple (slack_user_id, email, targetprocess_id)
+            print(f"DEBUG: Found user by name parts ({first_name}, {last_name}): {result}")
+            return result, None
+        else:
+            print(f"DEBUG: No user found by name parts ({first_name}, {last_name})")
+            return None, "No authenticated user was found with the given name(s)."
+
+    except sqlite3.Error as e:
+        print(f"ERROR: Database error in find_user_by_name_parts for ({first_name}, {last_name}): {e}")
+        return None, f"A database error occurred: {e}"
+    except Exception as e:
+        print(f"ERROR: Unexpected error in find_user_by_name_parts for ({first_name}, {last_name}): {e}")
+        return None, f"An unexpected error occurred: {e}"
+    finally:
+        if conn:
+            conn.close()
