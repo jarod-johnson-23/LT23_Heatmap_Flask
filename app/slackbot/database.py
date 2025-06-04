@@ -230,9 +230,6 @@ def verify_code(slack_user_id, code):
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
 
-    # Calculate the expiry timestamp
-    expiry_timestamp = (datetime.now() - timedelta(minutes=VERIFICATION_EXPIRY_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
-
     cursor.execute(
         """
         SELECT email, code, created_at FROM verification_codes
@@ -249,8 +246,12 @@ def verify_code(slack_user_id, code):
 
     email, stored_code, created_at = result
 
-    # Check if the code has expired
-    if created_at < expiry_timestamp:
+    # Parse the created_at timestamp and check if it has expired
+    created_at_datetime = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+    current_datetime = datetime.now()
+    
+    # Check if the code has expired (current time > created_at + expiry minutes)
+    if current_datetime > (created_at_datetime + timedelta(minutes=VERIFICATION_EXPIRY_MINUTES)):
         # Clean up expired code
         cursor.execute("DELETE FROM verification_codes WHERE slack_user_id = ?", (slack_user_id,))
         conn.commit()
