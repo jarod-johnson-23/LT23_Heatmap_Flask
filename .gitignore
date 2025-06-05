@@ -11,3 +11,4 @@ requirements.txt
 /heatmap/heatmap/data
 /app/targetprocess/google
 app/slackbot/data/conversations.db
+app/cocopah/db/optin.db

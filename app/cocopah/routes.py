@@ -1,7 +1,10 @@
 import os
 import sqlite3
-from flask import Blueprint, request, jsonify, current_app
-from itsdangerous import SignatureExpired, BadTimeSignature
+import json
+import base64
+import hashlib
+from flask import Blueprint, request, jsonify
+from cryptography.fernet import Fernet, InvalidToken
 from datetime import datetime
 
 cocopah_bp = Blueprint("cocopah_bp", __name__)
@@ -9,6 +12,11 @@ cocopah_bp = Blueprint("cocopah_bp", __name__)
 DB_DIR = os.path.join(os.path.dirname(__file__), 'db')
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "optin.db")
+
+def generate_key(passphrase: str) -> bytes:
+    """Generates a URL-safe, base64-encoded 32-byte key from a passphrase."""
+    hashed_key = hashlib.sha256(passphrase.encode()).digest()
+    return base64.urlsafe_b64encode(hashed_key)
 
 def init_cocopah_db():
     """Initializes the Cocopah Opt-In SQLite database."""
@@ -37,27 +45,34 @@ init_cocopah_db()
 @cocopah_bp.route("/email-signup/<token>", methods=["GET"])
 def cocopah_email_signup(token):
     """
-    Handles email signup confirmation via a tokenized URL.
+    Handles email signup confirmation via a Fernet-encrypted token.
     Decrypts the token to get user info and saves it to the database.
     """
-    serializer = current_app.serializer
+    passphrase = os.getenv("COCOPAH_PASSPHRASE")
+    if not passphrase:
+        print("ERROR: COCOPAH_PASSPHRASE environment variable not set.")
+        return jsonify({"status": "failure", "reason": "Server configuration error."}), 500
+
     try:
-        # Decrypt the token, max_age can be set if tokens should expire
-        data = serializer.loads(token, max_age=None) 
+        fernet_key = generate_key(passphrase)
+        f = Fernet(fernet_key)
+
+        # Decrypt the token using the Fernet key
+        decrypted_bytes = f.decrypt(token.encode())
+        decrypted_data_string = decrypted_bytes.decode()
+        data = json.loads(decrypted_data_string)
+        
         email = data.get("email")
         first_name = data.get("first_name")
         last_name = data.get("last_name")
 
         if not all([email, first_name, last_name]):
-            return jsonify({"status": "failure", "reason": "Token is missing required data."}), 400
+            return jsonify({"status": "failure", "reason": "Decrypted token is missing required data."}), 400
 
-        # Get user's IP address. Prioritize X-Forwarded-For header to get the
-        # original client IP even when behind a proxy (like the WordPress site).
+        # Get user's IP address
         if request.headers.get("X-Forwarded-For"):
-            # The header can be a comma-separated list of IPs. The first one is the client.
             ip_address = request.headers.get("X-Forwarded-For").split(',')[0].strip()
         else:
-            # Fallback to the direct IP of the requestor.
             ip_address = request.remote_addr
 
         # Add data to the database
@@ -77,7 +92,6 @@ def cocopah_email_signup(token):
                 "message": f"Thank you, {first_name}! Your email ({email}) has been confirmed."
             }), 200
         except sqlite3.IntegrityError:
-            # This happens if the email is already in the database (UNIQUE constraint)
             conn.rollback()
             return jsonify({
                 "status": "success",
@@ -86,10 +100,11 @@ def cocopah_email_signup(token):
         finally:
             conn.close()
 
-    except SignatureExpired:
-        return jsonify({"status": "failure", "reason": "The confirmation link has expired."}), 400
-    except BadTimeSignature:
-        return jsonify({"status": "failure", "reason": "The confirmation link is invalid or has been tampered with."}), 400
+    except InvalidToken:
+        return jsonify({"status": "failure", "reason": "The confirmation link is invalid, has been tampered with, or is not a valid token."}), 400
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        return jsonify({"status": "failure", "reason": "An unexpected error occurred."}), 500 
+        # Log the full traceback to the console for debugging
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "failure", "reason": "An unexpected server error occurred."}), 500 
