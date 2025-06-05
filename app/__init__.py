@@ -40,6 +40,7 @@ from .targetprocess.routes import routes, targetprocess_bp
 from .assistants.routes import routes, assistants_bp, setup_socketio
 from .audiobot.routes import routes, audiobot_bp
 from .slackbot.routes import routes, slackbot_bp
+from .cocopah.routes import cocopah_bp
 
 socketio = SocketIO()
 
@@ -88,6 +89,7 @@ def create_app():
     app.register_blueprint(assistants_bp, url_prefix="/assistants")
     app.register_blueprint(audiobot_bp, url_prefix="/audiobot")
     app.register_blueprint(slackbot_bp, url_prefix="/slack")
+    app.register_blueprint(cocopah_bp, url_prefix="/cocopah")
     # Configure Flask-PyMongo
     mongo_uri = os.getenv("mongo_uri")
     client = MongoClient(mongo_uri)
@@ -195,5 +197,7 @@ def create_app():
         
         # Return the response as JSON
         return jsonify(response)
+    
+    
 
     return app
