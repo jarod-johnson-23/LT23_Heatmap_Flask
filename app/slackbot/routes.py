@@ -4,13 +4,10 @@ import json
 import boto3
 from botocore.exceptions import ClientError
 import re
-import pytz
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from openai import OpenAI
 from datetime import datetime, time
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from pathlib import Path
 from .database import (
     init_db, get_previous_response_id, update_response_id, reset_all_conversations,
@@ -80,30 +77,6 @@ slack_client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
 
 # Initialize the database
 init_db()
-
-# Set up the scheduler for daily reset at 2AM MST (9AM UTC)
-# Explicitly set timezone to UTC to avoid server timezone issues
-scheduler = BackgroundScheduler(timezone='UTC')
-mst_timezone = pytz.timezone('America/Denver')  # MST timezone
-
-def daily_reset_job():
-    """Reset all conversations daily at 2AM MST (9AM UTC)."""
-    reset_count = reset_all_conversations()
-    deleted_count = cleanup_old_processed_messages()
-    current_time_utc = datetime.now(pytz.UTC)
-    current_time_mst = current_time_utc.astimezone(mst_timezone)
-    print(f"[{current_time_mst}] Daily reset: Cleared {reset_count} conversation histories and {deleted_count} processed message records")
-
-# Schedule the job to run at 9AM UTC (2AM MST)
-scheduler.add_job(
-    daily_reset_job,
-    trigger=CronTrigger(hour=9, minute=0, timezone=pytz.UTC),
-    id='daily_reset_job',
-    name='Reset all conversations at 9AM UTC (2AM MST)',
-    replace_existing=True
-)
-
-scheduler.start()
 
 def send_verification_email(recipient_email, code):
     """Send a verification code email using AWS SES, matching the dashboard pattern."""
