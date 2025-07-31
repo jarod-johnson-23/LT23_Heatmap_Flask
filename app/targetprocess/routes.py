@@ -1,4 +1,4 @@
-from flask import Blueprint, current_app, request, jsonify
+from flask import Blueprint, current_app, request, jsonify, make_response
 from functools import wraps
 import os
 import io
@@ -670,3 +670,23 @@ def sow_gdrive_upload():
     file_ext = data.get('file_extension', 'pdf')  # Assume PDF by default, adjust as needed
     process_file(file_stream, file_ext)
     return jsonify({"message": "Google Drive file downloaded and processed successfully"}), 200
+
+@targetprocess_bp.route('/microsoft-graph-webhook', methods=['POST'])
+def microsoft_graph_webhook():
+    """
+    Webhook endpoint for Microsoft Graph API.
+    Handles validation requests and webhook notifications.
+    """
+    
+    # Check for validation token in query parameters
+    validation_token = request.args.get('validationToken')
+    
+    if validation_token:
+        # Return validation token for subscription validation
+        response = make_response(validation_token)
+        response.headers['Content-Type'] = 'text/plain'
+        return response, 200
+    
+    # If no validation token, return 202 (Accepted)
+    return '', 202
+
