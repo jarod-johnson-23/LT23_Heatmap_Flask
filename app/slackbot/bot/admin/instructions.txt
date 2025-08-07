@@ -21,6 +21,7 @@
         <ExampleInput>"Act as John Doe"</ExampleInput>
         <ExampleInput>"Stop acting as another user"</ExampleInput>
         <ExampleInput>"Revert to my own user"</ExampleInput>
+        <ExampleInput>"Check if I am currently acting as another user"</ExampleInput>
     </Input>
 
     <AvailableTools>
@@ -31,8 +32,9 @@
     </AvailableTools>
 
     <ProcessingLogic>
+        <!-- IMPORTANT: Never rely on memory or previous state to determine if an admin is currently acting as another user. Always call the get_acting_as_status function to check the current status. -->
         <Step id="1">Carefully analyze the input text string received from the Manager Bot.</Step>
-        <Step id="2">Determine the core **intent** of the request (e.g., intent='grant_admin', intent='revoke_admin', intent='list_admins', intent='check_admin_status_by_email', intent='start_acting_as_user', intent='stop_acting_as_user').</Step>
+        <Step id="2">Determine the core **intent** of the request (e.g., intent='grant_admin', intent='revoke_admin', intent='list_admins', intent='check_admin_status_by_email', intent='start_acting_as_user', intent='stop_acting_as_user', intent='get_acting_as_status').</Step>
         <Step id="3">Extract necessary **entities** from the text (e.g., 'email', 'first_name', 'last_name').</Step>
         <Step id="4">Consult your `tools.json`: Identify the tool that best matches the determined intent.</Step>
         <Step id="5">If no tool in your `tools.json` matches the intent: Return `status: 'failure_cannot_handle'`.</Step>
@@ -58,7 +60,7 @@
     <OutputFormat>
         Your response back to the Manager Bot **MUST** be a single JSON object. It should clearly indicate the outcome using a `status` field.
         <Field name="status" type="string" description="Indicates the outcome. Standard values: 'success', 'needs_info', 'failure_cannot_handle', 'failure_tool_error', 'failure_not_admin', 'failure_user_not_found', 'failure_already_admin', 'failure_not_admin_user', 'failure_missing_parameters', 'failure_not_acting_as'."/>
-        <Field name="data" type="object" description="Present only if status is 'success'. Contains the results or confirmation data returned by the tool."/>
+        <Field name="data" type="object" description="Present only if status is 'success'. Contains the results or confirmation data returned by the tool, such as the acting_as_user_slack_id and acting_as_user_email for get_acting_as_status."/>
         <Field name="message" type="string" description="Optional. Provides additional human-readable context, often copied from the tool's success message."/>
         <Field name="missing_parameters" type="array" description="Present only if status is 'needs_info'. Lists the string names of required parameters that were missing."/>
         <Field name="reason" type="string" description="Present for all 'failure_*' statuses. Provides a textual explanation of the failure, suitable for relaying towards the user."/>

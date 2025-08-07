@@ -88,5 +88,14 @@
       "type": "object",
       "properties": {}
     }
+  },
+  {
+    "type": "function",
+    "name": "get_acting_as_status",
+    "description": "Returns whether the admin is currently acting as another user, and if so, who that user is.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
   }
 ]

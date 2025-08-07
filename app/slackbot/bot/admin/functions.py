@@ -406,3 +406,30 @@ def stop_acting_as_user(slack_id=None):
             "status": status_code,
             "reason": message if message else "Failed to stop 'acting as' session due to an unexpected error."
         }
+
+@admin_required
+def get_acting_as_status(slack_id=None):
+    """
+    Returns whether the admin is currently acting as another user, and if so, who that user is.
+    """
+    acting_as_user_slack_id = get_acting_as_user_id(slack_id)
+    if acting_as_user_slack_id:
+        # Try to get the email of the user being impersonated
+        user_email = get_user_email(acting_as_user_slack_id)
+        return {
+            "status": "success",
+            "message": f"You are currently acting as user {user_email} (Slack ID: {acting_as_user_slack_id}).",
+            "data": {
+                "acting_as_user_slack_id": acting_as_user_slack_id,
+                "acting_as_user_email": user_email
+            }
+        }
+    else:
+        return {
+            "status": "success",
+            "message": "You are not currently acting as any user.",
+            "data": {
+                "acting_as_user_slack_id": None,
+                "acting_as_user_email": None
+            }
+        }
