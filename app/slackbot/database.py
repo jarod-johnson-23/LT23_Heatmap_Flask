@@ -19,6 +19,8 @@ DB_PATH = DB_DIR / "conversations.db"
 EXPIRY_HOURS = 12
 # Define the verification code expiry time (10 minutes)
 VERIFICATION_EXPIRY_MINUTES = 10
+# Define the acting-as expiry time (60 minutes)
+ACTING_AS_EXPIRY_MINUTES = 60
 
 def init_db():
     """Initialize the database with the required tables."""
@@ -595,6 +597,29 @@ def set_first_user_as_admin():
     except Exception as e:
         print(f"Error setting first user as admin: {e}") 
 
+def cleanup_expired_acting_as_logs():
+    """Remove acting_as_log entries older than the configured expiry window."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        expiry_timestamp = (datetime.now() - timedelta(minutes=ACTING_AS_EXPIRY_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute(
+            "DELETE FROM acting_as_log WHERE created_at < ?",
+            (expiry_timestamp,)
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        return deleted_count
+    except sqlite3.Error as e:
+        print(f"ERROR: Failed to cleanup expired acting_as_log entries: {e}")
+        if conn:
+            conn.rollback()
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
 def add_acting_as_log(admin_slack_id: str, user_slack_id: str):
     """Adds or updates an entry in the acting_as_log table."""
     conn = None
@@ -608,6 +633,17 @@ def add_acting_as_log(admin_slack_id: str, user_slack_id: str):
             (admin_slack_id,)
         )
         
+        # Best-effort cleanup of any expired entries before inserting a new one
+        try:
+            expiry_timestamp = (datetime.now() - timedelta(minutes=ACTING_AS_EXPIRY_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute(
+                "DELETE FROM acting_as_log WHERE created_at < ?",
+                (expiry_timestamp,)
+            )
+        except Exception:
+            # Non-fatal; continue with insert
+            pass
+
         # Insert the new entry
         cursor.execute(
             """
@@ -671,9 +707,19 @@ def get_acting_as_user_id(admin_slack_id: str):
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
+        # Remove any expired entry for this admin
+        expiry_timestamp = (datetime.now() - timedelta(minutes=ACTING_AS_EXPIRY_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute(
-            "SELECT user_slack_id FROM acting_as_log WHERE admin_slack_id = ?",
-            (admin_slack_id,)
+            "DELETE FROM acting_as_log WHERE admin_slack_id = ? AND created_at < ?",
+            (admin_slack_id, expiry_timestamp)
+        )
+        if cursor.rowcount > 0:
+            conn.commit()
+
+        # Fetch active (non-expired) acting-as session
+        cursor.execute(
+            "SELECT user_slack_id FROM acting_as_log WHERE admin_slack_id = ? AND created_at >= ?",
+            (admin_slack_id, expiry_timestamp)
         )
         result = cursor.fetchone()
         if result:
