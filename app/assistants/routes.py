@@ -1,7 +1,6 @@
 from flask import Blueprint, session, request, send_file, jsonify
 from flask_socketio import emit, join_room
 from openai import OpenAI, AssistantEventHandler
-import uuid
 import requests
 import os
 import json
@@ -21,13 +20,9 @@ ASSISTANTS_DIR = os.path.dirname(os.path.abspath(__file__))
 # Use the provided assistant ID from the environment
 assistant_id = os.getenv("SOW_ASSISTANT_ID")
 
-@assistants_bp.before_app_request
-def before_request():
-    if 'user_id' not in session:
-        session['user_id'] = str(uuid.uuid4())
-    if 'thread_id' not in session:
-        thread = client.beta.threads.create()
-        session['thread_id'] = thread.id  # Accessing the 'id' attribute correctly
+# ponytail: removed before_app_request hook - it ran on EVERY request in the whole
+# app (including /slack/events) and 404'd once OpenAI retired the Assistants API.
+# The socketio handlers below already create user_id/thread_id lazily when needed.
 
 @assistants_bp.route("/download_file", methods=['POST'])
 def download_openai_file():
